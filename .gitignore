@@ -1,0 +1,16 @@
+# Generado por setup.command y build.command
+editor/.venv/
+editor/.build/
+editor/runtime/
+editor/Studio Local.app/
+editor/.session.json
+editor/mobile/.runtime/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Tus proyectos, vídeos y LUT de DJI no se suben
+editor/projects/
+editor/assets/luts/*.cube
+assets/audio/*
+!assets/audio/README.md

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data:; media-src 'self' file:; connect-src 'none'"><title>Studio Local</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="feedback.css"></head>
+<body>
+<header>
+  <div class="brand"><span class="mark">s</span><span>studio<span class="brand-light"> local</span></span></div>
+  <span class="divider"></span><button id="homeProjects" class="quiet" hidden>← Proyectos</button>
+  <select id="projects" aria-label="Proyecto activo" hidden></select>
+  <span id="homeHeader" class="home-header">TU ESPACIO DE EDICIÓN</span>
+  <button id="newProject" class="quiet" title="Nuevo proyecto">＋ Nuevo</button><button id="openProject" class="quiet">Abrir</button>
+  <span class="save-state" id="saveState" hidden>Local · sin subidas</span>
+  <button id="feedbackToggle" class="feedback-toggle" hidden><b>F</b> Feedback <span id="feedbackCount">0</span></button>
+  <button id="preview" class="secondary" hidden>▶ Vista previa</button><button id="export" class="primary" hidden>Exportar <span>↗</span></button>
+</header>
+<section id="projectHome" aria-labelledby="homeTitle">
+ <div class="home-content">
+  <button id="folderBack" class="quiet folder-back" hidden>← Todas las carpetas</button>
+  <div class="home-heading"><div><p class="eyebrow">BIBLIOTECA LOCAL</p><h1 id="homeTitle"><span id="homeTitleText">Tus proyectos</span><span class="project-count" id="homeCount">—</span></h1><p id="homeSubtitle" class="home-subtitle">Todo lo que estás creando, en un solo lugar.</p></div><div class="home-actions"><button id="newFolder" class="secondary">＋ Nueva carpeta</button><button id="homeNew" class="primary">＋ Nuevo proyecto</button></div></div>
+  <div id="folderActions" class="folder-actions" hidden><button id="renameFolder" class="quiet">Renombrar carpeta</button><button id="deleteFolder" class="quiet">Eliminar carpeta vacía</button></div>
+  <div class="home-toolbar"><label class="project-search"><span aria-hidden="true">⌕</span><input id="projectSearch" type="search" placeholder="Buscar un proyecto…" aria-label="Buscar proyectos" autocomplete="off"></label><label class="project-sort">Ordenar por<select id="projectSort" aria-label="Orden de proyectos"><option value="recent">Última modificación</option><option value="name">Nombre</option></select></label><button id="refreshHome" class="quiet" aria-label="Actualizar proyectos" title="Actualizar proyectos">↻</button></div>
+  <p id="homeMessage" class="home-message" role="status">Cargando tus proyectos…</p>
+  <div id="folderGrid" class="folder-grid" aria-label="Carpetas de proyectos"></div>
+  <div id="projectGrid" class="project-grid"></div>
+  <div class="home-footer"><span><i class="status-dot"></i> Guardados en este Mac</span><span>Abre una tarjeta para continuar editando.</span></div>
+ </div>
+</section>
+<main id="editorWorkspace" hidden>
+<aside class="library">
+ <div class="section-head"><h2>Biblioteca</h2><button id="import" title="Añadir archivos" aria-label="Añadir archivos">＋</button></div>
+ <div class="tabs"><button class="active" data-tab="media">Medios</button><button data-tab="motion">Motion</button><button data-tab="text">Texto</button></div>
+ <section id="mediaPanel"><div class="quick-media"><button id="pasteImage" class="secondary">▧ Pegar imagen <small>⌘V</small></button><button id="importOverlay" class="secondary">▣ Superponer vídeo</button><button id="importSfx" title="Abre tu biblioteca de efectos de sonido">♫ Añadir efecto de sonido</button><button id="importMusic" title="Intros, fondo tranquilo y tensión suave">♪ Añadir música</button></div><div id="mediaList" class="media-list"></div><button id="importMore" class="dashed">＋ Añadir vídeo, imagen o audio</button><p class="muted help">Pega una captura en el punto actual. Arrástrala en el visor y elige su entrada. Los originales se conservan.</p></section>
+ <section id="motionPanel" hidden><p class="eyebrow">COMPOSICIONES EDITABLES</p><div id="templates"></div></section>
+ <section id="textPanel" hidden><button id="addTitle" class="template"><span class="template-glyph">Aa</span><strong>Título editorial</strong><small>Entrada suave · sombra sutil</small></button><button id="addLower" class="template"><span class="template-glyph">—</span><strong>Nombre y contexto</strong><small>Jerarquía en dos líneas</small></button><button id="captions" class="secondary full">Importar subtítulos SRT</button><div id="captionList"></div></section>
+ <div class="library-bottom"><span class="status-dot"></span> Motor local <span id="formatBadge">1080p · 59,94</span></div>
+</aside>
+<section class="workspace">
+ <div class="viewer-heading"><span id="projectTitle">Tu siguiente vídeo</span><span id="previewBadge" class="tag">Sin previsualización</span></div>
+ <div class="viewer" id="viewer"><div class="empty" id="emptyViewer"><div class="empty-mark">▻</div><h1>Da forma a tu historia.</h1><p>Importa tu vídeo. Corta con precisión.<br>Añade solo lo que ayude a entenderlo.</p><button id="emptyImport" class="primary">Añadir primer vídeo</button></div><img id="still" alt="Fotograma del proyecto" hidden><div class="viewer-label" id="viewerLabel" hidden>STUDIO LOCAL</div></div>
+ <div class="transport"><div class="transport-left"><span id="resolution">—</span><span id="renderState"></span></div><div class="transport-buttons"><button id="backFrame" title="Fotograma anterior" aria-label="Fotograma anterior">‹</button><button id="play" class="play" aria-label="Reproducir">▶</button><button id="nextFrame" title="Fotograma siguiente" aria-label="Fotograma siguiente">›</button></div><div class="timecode"><span id="cursorTime">00:00:00:00</span><span class="muted"> / </span><span id="durationTime">00:00:00:00</span></div></div>
+ <div id="playbackSpeedControls" class="playback-speed" role="group" aria-label="Velocidad de reproducción" hidden>
+  <label for="playbackSpeed">Velocidad</label><input id="playbackSpeed" type="range" min="1" max="2" step="0.01" value="1" aria-label="Velocidad de reproducción, de 1 a 2">
+  <label class="speed-value" title="Escribe un valor entre 1 y 2, por ejemplo 1,25"><input id="playbackRate" type="text" inputmode="decimal" value="1" autocomplete="off" aria-label="Velocidad personalizada" maxlength="6"><span aria-hidden="true">×</span></label>
+  <div class="speed-presets" aria-label="Velocidades rápidas"><button id="speed1" aria-pressed="true">1×</button><button id="speed15" aria-pressed="false">1,5×</button><button id="speed2" aria-pressed="false">2×</button></div>
+  <span class="speed-hint" title="La velocidad de revisión no cambia el montaje ni la exportación">Solo revisión</span>
+ </div>
+ <section id="analysis" class="analysis" hidden><div class="section-head"><h2>Silencios para revisar</h2><button id="closeAnalysis">×</button></div><p class="muted">Conservamos margen alrededor de la voz. Revisa cada propuesta antes de cortar.</p><div id="analysisItems"></div></section>
+</section>
+<aside class="inspector">
+ <section id="feedbackPanel" hidden>
+  <div class="section-head"><h2>Feedback</h2><button id="feedbackPanelClose" aria-label="Cerrar lista de feedback">×</button></div>
+  <button id="feedbackNew" class="feedback-primary full">＋ Añadir comentario <kbd>⌘F</kbd></button>
+  <div class="feedback-filters"><button id="feedbackOpenFilter" class="active">Pendientes</button><button id="feedbackAllFilter">Todos</button><button id="feedbackResolvedFilter">Resueltos</button></div>
+  <p id="feedbackListStatus" class="muted tiny" role="status"></p><div id="feedbackList"></div>
+ </section>
+ <div class="section-head"><h2>Inspector</h2><span id="selectedBadge" class="tag">Proyecto</span></div>
+ <div id="selectionFields" class="selection-fields"><p class="muted">Selecciona un clip, gráfico o sonido en la línea de tiempo.</p></div>
+ <div class="mixer"><div class="section-head"><h2>Mezcla</h2><span class="eyebrow">VOLUMEN</span></div>
+  <div id="mixerVolumes"></div>
+  <label class="check"><input id="ducking" type="checkbox"> Bajar música mientras hablo</label>
+  <p class="muted tiny">Limitador de seguridad en la salida. Voz, música y efectos permanecen separados.</p>
+ </div>
+ <div class="export-settings"><h3>Salida</h3><select id="outputSize" aria-label="Resolución de salida"><option value="1920x1080">1080p · Horizontal</option><option value="3840x2160">4K · Horizontal</option><option value="1080x1920">1080p · Vertical</option><option value="1080x1080">1080p · Cuadrado</option></select><span class="muted tiny">H.264 · Rec.709 SDR · AAC 48 kHz</span></div>
+</aside>
+</main>
+<section class="timeline-panel" id="editorTimeline" hidden>
+ <div class="timeline-tools"><div class="tool-group"><button id="undo" title="Deshacer (⌘Z)">↶</button><button id="redo" title="Rehacer (⇧⌘Z)">↷</button><span class="divider"></span><button id="split" title="Divide el vídeo y sus capas vinculadas en el cabezal (B)">✂ Dividir · B</button><button id="duplicate" title="Selecciona un elemento para duplicarlo" disabled>⧉ Duplicar</button><button id="delete" title="Quitar el clip seleccionado; en vídeo arrastra las capas vinculadas">Quitar clip</button><button id="linkAll" class="secondary" title="Vincular todas las pistas al vídeo para los próximos cortes (⌘J)">Vincular todo <kbd>⌘J</kbd></button></div><div class="tool-group"><button id="silence" class="quiet">Detectar silencios</button><span class="divider"></span><div class="zoom-control"><button id="zoomOut" aria-label="Alejar línea de tiempo" title="Alejar (−)">−</button><input id="timelineZoom" type="range" min="0" max="6" step="0.125" value="0" aria-label="Zoom de línea de tiempo"><button id="zoomIn" aria-label="Ampliar línea de tiempo" title="Ampliar (+)">＋</button><output id="timelineScale">1.0×</output><button id="zoomFit" title="Ver toda la línea de tiempo">Ajustar</button></div></div></div>
+ <div class="range-toolbar"><span class="range-title">CORTE RÁPIDO</span><button id="markIn" title="Marca el primer fotograma que se quitará">Inicio <kbd>I</kbd></button><button id="markOut" title="Incluye el fotograma actual como final del tramo">Fin <kbd>O</kbd></button><span id="rangeSummary" role="status"></span><button id="clearRange" title="Limpiar selección de tramo (Esc)" disabled>Limpiar</button><button id="cutRange" class="cut-button" disabled>Eliminar selección</button></div>
+ <div class="timeline-scroll" id="timelineScroll" tabindex="0" aria-label="Línea de tiempo editable"><div class="track-labels" id="trackLabels"></div><div class="timeline-content" id="timelineContent"><div id="ruler" class="ruler" aria-label="Regla: arrastra para seleccionar un tramo"></div><div id="feedbackTrack" class="feedback-track" aria-label="Marcadores de feedback"></div><div class="track" data-track="video"></div><div class="track" data-track="overlays"></div><div class="track" data-track="graphics"></div><div class="track" data-track="captions"></div><div class="track" data-track="voice"></div><div class="track" data-track="music"></div><div class="track" data-track="sfx"></div><div id="groupSelection" class="group-selection" hidden></div><div id="edgePreview" class="edge-preview" hidden><span></span></div><div id="rangeIn" class="range-marker in" hidden><span>I</span></div><div id="rangeOut" class="range-marker out" hidden><span>O</span></div><div id="playhead" class="playhead"><span></span></div></div></div>
+ <footer><span id="projectStats">Sin proyecto</span><span id="linkStatus">Todo vinculado</span><span>⌘C ×2: seleccionar tramo · bordes: ajustar · Supr: eliminar · ⌘Z: deshacer</span></footer>
+</section>
+<div id="syncConflict" class="sync-notice" hidden><span id="syncConflictText"></span><button id="resolveSync">Descartar mi intento y cargar versión guardada</button></div>
+<div class="sync-status"><span id="syncMessage" hidden></span><button id="updateEditor" hidden>Actualizar editor · conservar sesión</button></div>
+<div id="toast" role="status" hidden></div>
+<dialog id="feedbackDialog" aria-labelledby="feedbackTitle">
+ <div class="feedback-dialog-head"><div><span class="feedback-kicker">REVISIÓN DEL VÍDEO</span><h2 id="feedbackTitle">¿Qué cambiamos aquí?</h2></div><div class="feedback-dialog-time"><span id="feedbackTime"></span><button id="feedbackClose" aria-label="Cerrar feedback">×</button></div></div>
+ <div class="feedback-body">
+  <div class="feedback-visual">
+   <div class="feedback-tools" role="toolbar" aria-label="Herramientas de anotación">
+    <button id="feedbackPen" class="active" title="Dibujo libre" aria-label="Dibujo libre">✎ <span>Dibujar</span></button><button id="feedbackEllipse" title="Rodear una zona" aria-label="Rodear una zona">◯</button><button id="feedbackRect" title="Rectángulo" aria-label="Rectángulo">▭</button><button id="feedbackArrow" title="Flecha" aria-label="Flecha">↗</button>
+    <span class="divider"></span><input id="feedbackColor" type="color" value="#ffad5c" aria-label="Color del dibujo"><button id="feedbackUndo" title="Deshacer último trazo" aria-label="Deshacer último trazo">↶</button><button id="feedbackClear" title="Borrar dibujo" aria-label="Borrar dibujo">Borrar</button>
+   </div>
+   <div id="feedbackCanvas" class="feedback-canvas"><img id="feedbackImage" alt="Fotograma exacto asociado al feedback"><svg id="feedbackDrawing" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-label="Dibuja sobre el fotograma"></svg><div id="feedbackCaptureStatus" class="feedback-capture-status">Preparando fotograma…</div></div>
+   <div class="feedback-image-footer"><span>Arrastra sobre la imagen para señalar una zona.</span><button id="feedbackRetryCapture" hidden>Reintentar captura</button><button id="feedbackGoTo">Ir a este momento ↗</button></div>
+  </div>
+  <div class="feedback-comment"><label for="feedbackText">Tu indicación</label><textarea id="feedbackText" maxlength="12000" placeholder="Por ejemplo: cambia este título por ‘Más clientes’. He rodeado la zona." rows="7"></textarea><p id="feedbackPosition" class="muted tiny"></p><p id="feedbackSaveState" class="feedback-save-state" role="status">Borrador</p><p id="feedbackError" class="feedback-error" role="alert" hidden></p><button id="feedbackRetrySave" hidden>Reintentar guardado</button><button id="feedbackReload" hidden>Descartar mi intento y cargar nota guardada</button>
+   <div class="feedback-note-actions"><button id="feedbackResolve" hidden>✓ Marcar resuelto</button><button id="feedbackDelete" class="quiet">Descartar borrador</button></div>
+   <div class="feedback-submit"><p>Texto, dibujo y captura quedan guardados juntos en este proyecto.</p><button id="feedbackPublish" class="feedback-primary">Guardar feedback <kbd>⌘↵</kbd></button></div>
+  </div>
+ </div>
+</dialog>
+<dialog id="folderDialog" aria-labelledby="folderDialogTitle"><form id="folderForm"><h2 id="folderDialogTitle">Nueva carpeta</h2><label for="folderName">Nombre<input id="folderName" required maxlength="80" autocomplete="off"></label><p id="folderError" class="folder-error" role="alert" hidden></p><div class="dialog-actions"><button id="folderCancel" type="button">Cancelar</button><button id="folderSave" class="primary" type="submit">Crear carpeta</button></div></form></dialog>
+<dialog id="newDialog"><form method="dialog"><h2>Nuevo proyecto</h2><label>Nombre<input id="newName" value="Mi vídeo" required maxlength="120"></label><label>Fotogramas por segundo<select id="newFps"><option value="59.94005994005994">59,94</option><option value="25">25</option><option value="30">30</option><option value="60">60</option><option value="23.976023976023978">23,976</option></select></label><div class="dialog-actions"><button value="cancel">Cancelar</button><button id="createProject" class="primary" value="create">Crear proyecto</button></div></form></dialog>
+<div id="busy" hidden><div><span class="spinner"></span><strong id="busyTitle">Preparando vídeo…</strong><p id="busyNote">El proyecto y los originales se conservan.</p><button id="cancelRender" class="secondary">Cancelar</button></div></div>
+<audio id="soundPreview" hidden></audio>
+<dialog id="duplicateDialog" aria-labelledby="duplicateTitle"><form id="duplicateForm"><h2 id="duplicateTitle">Colocar la copia</h2><p class="muted tiny">La copia completa no cabe después del original. Elige dónde colocarla; su duración se ajustará al espacio disponible.</p><label for="duplicateStart">Inicio · segundos<input id="duplicateStart" type="text" inputmode="decimal" autocomplete="off"></label><div class="duplicate-positions"><button id="duplicateAtCursor" type="button">En el cabezal</button><button id="duplicateAfter" type="button">Tras el original</button></div><p id="duplicateSummary" class="tiny" aria-live="polite"></p><p id="duplicateError" class="folder-error" role="alert" hidden></p><div class="dialog-actions"><button id="duplicateCancel" type="button">Cancelar</button><button id="duplicateApply" class="primary" type="submit">Duplicar</button></div></form></dialog>
+<dialog id="cropDialog"><h2>Recortar imagen</h2><p class="muted">Arrastra las esquinas o mueve el rectángulo. El original se conserva.</p><div id="cropStage"><img id="cropSource" alt="Imagen original para recortar"><div id="cropRect"><span data-corner="tl"></span><span data-corner="tr"></span><span data-corner="bl"></span><span data-corner="br"></span></div></div><div class="dialog-actions"><button id="cropReset">Imagen completa</button><button id="cropCancel">Cancelar</button><button id="cropApply" class="primary">Aplicar recorte</button></div></dialog>
+<script src="app.js"></script><script src="audio.js"></script><script src="images.js"></script><script src="timeline.js"></script><script src="playback.js"></script><script src="sync.js"></script><script src="feedback.js"></script><script src="projects.js"></script></body></html>
