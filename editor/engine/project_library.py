@@ -1,12 +1,16 @@
 """One level of visual folders; project paths and edit history stay unchanged."""
 import fcntl
 import json
+import shutil
+import time
 import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
 import project
 import sync
+
+TRASH = Path.home()/'.Trash'
 
 
 def load(root):
@@ -73,10 +77,22 @@ def dispatch(root, req):
             for path in project_files(root):
                 # An unreadable project must not be silently treated as absent.
                 p = project.load(path)
-                if state['assignments'].get(p['id']) == item['id']:
+                if state['assignments'].get(p['id']) == item['id'] and not req.get('release'):
                     raise ValueError('Mueve los proyectos a otra carpeta antes de eliminar esta carpeta')
             state['folders'].remove(item)
             state['assignments'] = {k: v for k, v in state['assignments'].items() if v != item['id']}
+        elif command == 'trash':
+            path = Path(req.get('project', '')).expanduser().resolve()
+            if path.suffix != '.studio' or path.parent.parent != Path(root).resolve():
+                raise ValueError('Selecciona un proyecto de la biblioteca local')
+            p = project.load(path)
+            # Only the project's own folder moves; source media outside it is never touched.
+            TRASH.mkdir(parents=True, exist_ok=True)
+            target = TRASH/path.parent.name
+            if target.exists():
+                target = TRASH/f'{path.parent.name} {time.strftime("%H.%M.%S")}'
+            shutil.move(str(path.parent), str(target))
+            state['assignments'].pop(p['id'], None)
         elif command == 'assign':
             destination = req.get('folder')
             if destination is not None:

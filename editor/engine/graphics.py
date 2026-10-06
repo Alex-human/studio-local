@@ -58,8 +58,8 @@ def instagram_hook_parts(draw, content, x, y, size, width, box=False):
     for i,line in enumerate(lines):
         last=i==len(lines)-1
         rows.append((line,font(size,600 if last else 400,last),y+(i-(len(lines)-1)/2)*size*1.2))
-    line,face,cy=rows[-1];half=face.getlength(line)/2;stroke=max(1,round(size*.045))
-    underline=(x-half,cy+size*.67,x+half,cy+size*.67)
+    line,face,cy=rows[-1];half=face.getlength(line)/2;stroke=max(2,round(size*.09))
+    underline=(x-half,cy+size*.68,x+half,cy+size*.68)
     card=None
     if box:
         extents=[draw.textbbox((x,cy),'Hg',font=face,anchor='mm') for _,face,cy in rows]

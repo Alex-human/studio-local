@@ -5,6 +5,7 @@
   <div class="brand"><span class="mark">s</span><span>studio<span class="brand-light"> local</span></span></div>
   <span class="divider"></span><button id="homeProjects" class="quiet" hidden>← Proyectos</button>
   <select id="projects" aria-label="Proyecto activo" hidden></select>
+  <button id="renameProject" class="quiet" title="Renombrar proyecto" aria-label="Renombrar proyecto activo" hidden>✎ Renombrar</button>
   <span id="homeHeader" class="home-header">TU ESPACIO DE EDICIÓN</span>
   <button id="newProject" class="quiet" title="Nuevo proyecto">＋ Nuevo</button><button id="openProject" class="quiet">Abrir</button>
   <span class="save-state" id="saveState" hidden>Local · sin subidas</span>
@@ -15,7 +16,7 @@
  <div class="home-content">
   <button id="folderBack" class="quiet folder-back" hidden>← Todas las carpetas</button>
   <div class="home-heading"><div><p class="eyebrow">BIBLIOTECA LOCAL</p><h1 id="homeTitle"><span id="homeTitleText">Tus proyectos</span><span class="project-count" id="homeCount">—</span></h1><p id="homeSubtitle" class="home-subtitle">Todo lo que estás creando, en un solo lugar.</p></div><div class="home-actions"><button id="newFolder" class="secondary">＋ Nueva carpeta</button><button id="homeNew" class="primary">＋ Nuevo proyecto</button></div></div>
-  <div id="folderActions" class="folder-actions" hidden><button id="renameFolder" class="quiet">Renombrar carpeta</button><button id="deleteFolder" class="quiet">Eliminar carpeta vacía</button></div>
+  <div id="folderActions" class="folder-actions" hidden><button id="renameFolder" class="quiet">Renombrar carpeta</button><button id="deleteFolder" class="quiet">Eliminar carpeta</button></div>
   <div class="home-toolbar"><label class="project-search"><span aria-hidden="true">⌕</span><input id="projectSearch" type="search" placeholder="Buscar un proyecto…" aria-label="Buscar proyectos" autocomplete="off"></label><label class="project-sort">Ordenar por<select id="projectSort" aria-label="Orden de proyectos"><option value="recent">Última modificación</option><option value="name">Nombre</option></select></label><button id="refreshHome" class="quiet" aria-label="Actualizar proyectos" title="Actualizar proyectos">↻</button></div>
   <p id="homeMessage" class="home-message" role="status">Cargando tus proyectos…</p>
   <div id="folderGrid" class="folder-grid" aria-label="Carpetas de proyectos"></div>
@@ -87,6 +88,7 @@
   </div>
  </div>
 </dialog>
+<dialog id="confirmDialog" aria-labelledby="confirmTitle"><form method="dialog"><h2 id="confirmTitle"></h2><p id="confirmText"></p><div class="dialog-actions"><button id="confirmCancel" type="button">Cancelar</button><button id="confirmOk" class="primary" type="button"></button></div></form></dialog>
 <dialog id="folderDialog" aria-labelledby="folderDialogTitle"><form id="folderForm"><h2 id="folderDialogTitle">Nueva carpeta</h2><label for="folderName">Nombre<input id="folderName" required maxlength="80" autocomplete="off"></label><p id="folderError" class="folder-error" role="alert" hidden></p><div class="dialog-actions"><button id="folderCancel" type="button">Cancelar</button><button id="folderSave" class="primary" type="submit">Crear carpeta</button></div></form></dialog>
 <dialog id="newDialog"><form method="dialog"><h2>Nuevo proyecto</h2><label>Nombre<input id="newName" value="Mi vídeo" required maxlength="120"></label><label>Fotogramas por segundo<select id="newFps"><option value="59.94005994005994">59,94</option><option value="25">25</option><option value="30">30</option><option value="60">60</option><option value="23.976023976023978">23,976</option></select></label><div class="dialog-actions"><button value="cancel">Cancelar</button><button id="createProject" class="primary" value="create">Crear proyecto</button></div></form></dialog>
 <div id="busy" hidden><div><span class="spinner"></span><strong id="busyTitle">Preparando vídeo…</strong><p id="busyNote">El proyecto y los originales se conservan.</p><button id="cancelRender" class="secondary">Cancelar</button></div></div>

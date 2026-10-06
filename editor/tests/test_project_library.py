@@ -65,6 +65,22 @@ class ProjectFolderTests(unittest.TestCase):
         self.assertEqual(self.command('delete', id=id)['folders'], [])
         self.assertTrue(Path(result['path']).exists())
 
+    def test_trash_moves_project_dir_and_release_unassigns(self):
+        trash = Path(self.tmp.name)/'trash'
+        with patch.object(project_library, 'TRASH', trash):
+            id = self.new_folder()
+            a = editor.dispatch({'action': 'create', 'name': 'A', 'folder': id})
+            b = editor.dispatch({'action': 'create', 'name': 'B', 'folder': id})
+            self.command('trash', project=a['path'])
+            self.assertFalse(Path(a['path']).parent.exists())
+            self.assertTrue((trash/Path(a['path']).parent.name/'Proyecto.studio').exists())
+            self.command('delete', id=id, release=True)
+            listing = editor.dispatch({'action': 'list'})
+            self.assertEqual([x['id'] for x in listing['projects']], [b['project']['id']])
+            self.assertIsNone(listing['projects'][0]['folder'])
+            with self.assertRaises(ValueError):
+                self.command('trash', project=str(self.root.parent/'x'/'Proyecto.studio'))
+
     def test_names_and_stale_revision_do_not_overwrite(self):
         id = self.new_folder('Vídeos')
         for invalid in ['', '  ', 'x'*81, None, 'VÍDEOS', 'Vídeos']:

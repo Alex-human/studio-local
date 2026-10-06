@@ -322,6 +322,19 @@ def progress_file(work, state, current=0, total=0):
 # VideoToolbox: quality 75 beats x264 medium crf 16 against a lossless reference (51.9 vs 51.2 dB) with half the energy.
 ENCODER={'preview':['-c:v','h264_videotoolbox','-q:v','60'],'master':['-c:v','h264_videotoolbox','-q:v','75']}
 
+LIMITER='alimiter=limit=0.87:attack=5:release=60:level=disabled:latency=1'
+
+def loudness(path, chain=''):
+    report=subprocess.run([str(FF),'-hide_banner','-nostdin','-i',str(path),'-af',chain+'ebur128','-f','null','-'],capture_output=True,text=True).stderr
+    return float(re.findall(r'I:\s+(-?[\d.]+) LUFS',report)[-1])
+
+def master_level(mix):
+    """Masters play at −14 LUFS integrated, YouTube's level, with effect peaks limited."""
+    level=loudness(mix)
+    gain=0 if level<=-70 else -14-level   # silence stays silent
+    if gain:gain+=-14-loudness(mix,f'volume={gain:.2f}dB,{LIMITER},')   # the limiter shaves loud effects: one correction
+    return ['-af',f'volume={gain:.2f}dB,{LIMITER}']
+
 def render(p, folder, preview=False, with_audio=True, label=''):
     project.validate(p,check_files=True)
     if not p['clips']: raise ValueError('Añade al menos un clip de vídeo')
@@ -385,7 +398,7 @@ def render(p, folder, preview=False, with_audio=True, label=''):
         progress_file(work,'mixing',total,total)
         if with_audio:
             audio=render_audio(p,work)
-            run(['-v','error','-i',temp,'-i',audio,'-map','0:v','-map','1:a','-c:v','copy','-c:a','aac','-b:a','320k',
+            run(['-v','error','-i',temp,'-i',audio,'-map','0:v','-map','1:a','-c:v','copy',*([] if preview else master_level(audio)),'-c:a','aac','-b:a','320k',
                  '-t',total/fps,'-ar','48000','-movflags','+faststart',out])
         else:run(['-v','error','-i',temp,'-an','-c:v','copy','-movflags','+faststart',out])
         run(['-v','error','-hwaccel','videotoolbox','-i',out,'-f','null','-'])

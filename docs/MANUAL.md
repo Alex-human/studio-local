@@ -21,6 +21,12 @@ Abrir `editor/Studio Local.app` o ejecutar `./editor/studio.command`. Requiere l
 
 **Velocidad de revisión:** debajo de los botones de reproducción, mueve la barra de **1× a 2×**, escribe un valor como **1,25** (también acepta punto), o pulsa **1× / 1,5× / 2×**. Puedes ajustarla mientras reproduces; mantiene el tono de la voz y la sincronía de imagen, audio y sonidos de imágenes. Se recuerda al pausar, cambiar de proyecto o reabrir la sesión. Solo cambia la revisión: los tiempos, cortes, historial y exportación permanecen iguales.
 
+## Renombrar proyectos y carpetas
+
+En la biblioteca, pulsa el lápiz de la tarjeta para renombrar un proyecto. Desde el editor, pulsa **✎ Renombrar** junto al selector del proyecto. El nombre aparece seleccionado: escribe el nuevo y pulsa **Guardar nombre** o Intro; **Cancelar** o Escape conserva el anterior. Para una carpeta, ábrela y pulsa **Renombrar carpeta**.
+
+Renombrar un proyecto usa el autoguardado, el historial y la protección frente a cambios simultáneos existentes; se puede deshacer. Renombrar una carpeta conserva sus proyectos. Los nombres visibles cambian sin mover archivos, fuentes, feedback ni historial.
+
 ## Cortes conjuntos y música continua
 
 El vídeo es la base del montaje. **Vincular todo · ⌘J** une voz, música, efectos, gráficos y subtítulos para los próximos cortes. Cada pista muestra **Unida**, **Libre** o **Mixta**. Pulsa su botón para separar/vincular la pista completa, incluidos sus futuros elementos. Para excluir solo un clip, selecciónalo y pulsa **Separar del vídeo** en el inspector; el mismo botón permite volver a vincularlo.
@@ -96,7 +102,7 @@ Por código: `import` con `overlay:true`, `start` y, para sustituir, `replaceOve
 | Fotos y capturas | Portapapeles nativo, recorte no destructivo, arrastre/tamaño/giro, marco opcional, cinco entradas con desaceleración y sonido vinculado. |
 | Motion | Título, lower third, cifra animada, tarjetas, progreso, imagen y transición canal → explicación. Se colocan arrastrándolos en el visor o por sus campos de posición; la escena de canal ocupa el fotograma entero, no se mueve y está diseñada para 16:9. Parámetros y keyframes numéricos editables por código. |
 | Tipografía | Inter variable, tamaño ajustado al ancho, sombra discreta y entradas/salidas suaves. Subtítulos SRT. |
-| Sonido | Voz/música/SFX independientes, barras de 0–100 % por elemento y pista, posiciones a fotograma con retrasos de audio a muestras, fundidos, ducking y limitador de salida. |
+| Sonido | Voz/música/SFX independientes, barras de 0–100 % por elemento y pista, posiciones a fotograma con retrasos de audio a muestras, fundidos, ducking y limitador de salida. La exportación final sale a −14 LUFS integrados con los picos limitados; las vistas previas conservan el nivel del proyecto. |
 | IA generativa / 3D | Sin servicios de generación de fondos/ángulos ni motor 3D general integrado. |
 | Rendimiento | Capas nativas y caché de fotogramas; preparación por ventanas de 0,5 s y anticipación de hasta 2 s para efectos o medios que requieren render. Los tramos preparados se encadenan sin reiniciar el reproductor. Editar cancela solo sus preparaciones obsoletas. La reducción automática de música conserva una mezcla continua y puede necesitar más tiempo al cambiar el audio. |
 
@@ -152,9 +158,9 @@ FFmpeg proviene del paquete imageio-ffmpeg y tiene su propia licencia (GPL); no 
 
 ## Carpetas de proyectos
 
-En inicio, **Nueva carpeta** crea una carpeta visual de un nivel. Abre una tarjeta de carpeta para ver solo sus proyectos. **Nuevo proyecto** dentro de ella guarda la clasificación automáticamente. En cada tarjeta de proyecto, el selector **Mover a carpeta** cambia su ubicación visual; **Sin carpeta** lo devuelve al inicio. La búsqueda en inicio encuentra proyectos de todas las carpetas; dentro de una carpeta busca solo allí. Puedes renombrar una carpeta o eliminarla cuando esté vacía.
+En inicio, **Nueva carpeta** crea una carpeta visual de un nivel. Abre una tarjeta de carpeta para ver solo sus proyectos. **Nuevo proyecto** dentro de ella guarda la clasificación automáticamente. En cada tarjeta de proyecto, el selector **Mover a carpeta** cambia su ubicación visual; **Sin carpeta** lo devuelve al inicio. La búsqueda en inicio encuentra proyectos de todas las carpetas; dentro de una carpeta busca solo allí. Puedes renombrar una carpeta o eliminarla; si tiene proyectos, tras confirmar vuelven al inicio sin borrarse. **Eliminar** en una tarjeta de proyecto, tras confirmar, mueve su carpeta de proyecto (`.studio`, historial, `media/`) a la Papelera; los vídeos originales fuera del proyecto no se tocan.
 
-La clasificación se guarda de forma atómica en `projects/.folders.json`, bajo bloqueo y con revisión propia. No modifica `.studio`, historial, fuentes ni rutas de reproducción. CLI/MCP: `projectFolders` con `command: create|rename|delete|assign`; `list` devuelve `folders`, `folderRevision` y el `folder` de cada proyecto. `create` acepta `folder` opcional. Para asignar, usar `project` y `folder` (ID o `null`). Las mutaciones admiten `revision` del índice para detectar cambios simultáneos.
+La clasificación se guarda de forma atómica en `projects/.folders.json`, bajo bloqueo y con revisión propia. No modifica `.studio`, historial, fuentes ni rutas de reproducción. CLI/MCP: `projectFolders` con `command: create|rename|delete|assign|trash` (`delete` con `release:true` suelta los proyectos de la carpeta; `trash` con `project` mueve ese proyecto a la Papelera); `list` devuelve `folders`, `folderRevision` y el `folder` de cada proyecto. `create` acepta `folder` opcional. Para asignar, usar `project` y `folder` (ID o `null`). Las mutaciones admiten `revision` del índice para detectar cambios simultáneos.
 
 ## Biblioteca de efectos y música
 

@@ -3,7 +3,7 @@ let homeVisible=true,homeItems=[],homeGeneration=0,homeFolder=null;
 const posters=new Map(),posterElements=new Map();
 function setProjectView(home){
  homeVisible=home;$('projectHome').hidden=!home;$('homeHeader').hidden=!home;
- for(const id of ['editorWorkspace','editorTimeline','homeProjects','projects','saveState','preview','export','feedbackToggle'])$(id).hidden=home;
+ for(const id of ['editorWorkspace','editorTimeline','homeProjects','projects','renameProject','saveState','preview','export','feedbackToggle'])$(id).hidden=home;
 }
 function showEditor(){
  clearCutRange();zoom=1;$('timelineScroll').scrollLeft=0;
@@ -26,8 +26,8 @@ function drawProjectGrid(){
  $('homeTitleText').textContent=folder?folder.name:'Tus proyectos';$('homeCount').textContent=String(scope.length);
  $('homeSubtitle').textContent=folder?'Los proyectos de esta carpeta.':'Todo lo que estás creando, en un solo lugar.';
  $('folderBack').hidden=!folder;$('folderActions').hidden=!folder;$('newFolder').hidden=!!folder;
- $('deleteFolder').disabled=!!state.folderBusy||scope.length>0;
- $('deleteFolder').title=scope.length?'Mueve los proyectos a otra carpeta antes de eliminarla.':'Eliminar esta carpeta vacía';
+ $('deleteFolder').disabled=!!state.folderBusy;
+ $('deleteFolder').title=scope.length?'Eliminar la carpeta; sus proyectos vuelven al inicio':'Eliminar esta carpeta vacía';
  const showFolders=!folder&&!query;
  $('folderGrid').hidden=!showFolders;$('folderGrid').replaceChildren();
  if(showFolders)for(const entry of [...folders].sort((a,b)=>a.name.localeCompare(b.name,'es'))){
@@ -59,12 +59,15 @@ function drawProjectGrid(){
   const move=elem('select');move.setAttribute('aria-label','Mover '+item.name+' a carpeta');move.disabled=!!state.folderBusy;
   for(const destination of [{id:'',name:'Sin carpeta'},...folders]){const option=elem('option',null,destination.name);option.value=destination.id;move.append(option);}move.value=item.folder||'';
   move.onchange=safe(async()=>{const destination=move.value||null;if(destination===(item.folder||null))return;try{await mutateProjectFolders({command:'assign',project:item.path,folder:destination});}finally{move.value=item.folder||'';}});
-  moveRow.append(move);foot.append(date,preview);card.append(open,foot,moveRow);$('projectGrid').append(card);
+  const trash=elem('button','project-trash','Eliminar');trash.setAttribute('aria-label','Mover '+item.name+' a la Papelera');trash.disabled=!!state.folderBusy;
+  trash.onclick=safe(()=>askConfirm('¿Eliminar «'+item.name+'»?','El proyecto se moverá a la Papelera. Los vídeos originales no se tocan.','Mover a la Papelera').then(ok=>ok&&mutateProjectFolders({command:'trash',project:item.path})));
+  const rename=elem('button','project-rename','✎');rename.title='Renombrar proyecto';rename.setAttribute('aria-label','Renombrar '+item.name);rename.disabled=!!state.folderBusy;rename.onclick=safe(()=>openProjectNameDialog(item));
+  moveRow.append(move);foot.append(date,preview,rename,trash);card.append(open,foot,moveRow);$('projectGrid').append(card);
  }
 }
 function setFolderBusy(value){
  state.folderBusy=value;
- for(const id of ['newFolder','renameFolder','folderBack','homeNew','newProject','openProject','refreshHome','folderSave','folderCancel','folderName'])$(id).disabled=value;
+ for(const id of ['newFolder','renameFolder','renameProject','folderBack','homeNew','newProject','openProject','refreshHome','folderSave','folderCancel','folderName'])$(id).disabled=value;
  drawProjectGrid();
 }
 async function mutateProjectFolders(request){
@@ -86,8 +89,30 @@ function openFolderDialog(rename=false){
  if(state.folderBusy||!homeVisible)return;
  const folder=rename?currentFolder():null;if(rename&&!folder)return;
  state.folderEditing=folder?.id||null;
+ state.renamingProject=null;$('folderName').maxLength=80;
  $('folderDialogTitle').textContent=folder?'Renombrar carpeta':'Nueva carpeta';$('folderSave').textContent=folder?'Guardar nombre':'Crear carpeta';
- $('folderName').value=folder?.name||'';$('folderError').hidden=true;$('folderDialog').showModal();$('folderName').focus();
+ $('folderName').value=folder?.name||'';$('folderError').hidden=true;$('folderDialog').showModal();$('folderName').focus();if(folder)$('folderName').select();
+}
+async function openProjectNameDialog(item){
+ if(state.folderBusy||busy||state.conflict)return;
+ await flushEdits();if(!homeVisible)await pausePlayback();
+ state.renamingProject={path:item.path,revision:item.revision};
+ $('folderDialogTitle').textContent='Renombrar proyecto';$('folderSave').textContent='Guardar nombre';$('folderName').maxLength=120;
+ $('folderName').value=item.name;$('folderError').hidden=true;$('folderDialog').showModal();$('folderName').focus();$('folderName').select();
+}
+async function renameProject(name){
+ const target=state.renamingProject;setFolderBusy(true);
+ try{
+  const operations=[{op:'settings',values:{name}}];
+  let task;
+  if(!homeVisible&&path===target.path)task=ops(operations);
+  else{task=mutationTail.then(()=>api({action:'ops',project:target.path,revision:target.revision,ops:operations}));mutationTail=task.catch(()=>{});}
+  const data=await task;
+  const item=homeItems.find(item=>item.path===target.path);if(item)Object.assign(item,{name:data.project.name,revision:data.project.revision,modified:Date.now()/1000});
+  if(homeVisible){if(!await showProjects())toast('El nombre se guardó. Pulsa ↻ para actualizar la biblioteca.',true);}
+  else{try{await refreshProjects();}catch(_){toast('El nombre se guardó. Actualiza la biblioteca para verlo en la lista.',true);}}
+  return true;
+ }finally{setFolderBusy(false);}
 }
 async function loadPosters(generation){
  const queue=homeItems.filter(item=>item.duration&&!posters.has(posterKey(item)));
@@ -116,16 +141,29 @@ $('homeProjects').onclick=showProjects;$('refreshHome').onclick=()=>{posters.cle
 $('homeNew').onclick=$('newProject').onclick;
 $('folderBack').onclick=()=>setHomeFolder(null);
 $('newFolder').onclick=()=>openFolderDialog();$('renameFolder').onclick=()=>openFolderDialog(true);
+$('renameProject').onclick=safe(()=>openProjectNameDialog({path,revision:p.revision,name:p.name}));
 $('folderCancel').onclick=()=>{if(!state.folderBusy)$('folderDialog').close();};
 $('folderDialog').oncancel=e=>{if(state.folderBusy)e.preventDefault();};
 $('folderForm').onsubmit=async e=>{
  e.preventDefault();if(state.folderBusy)return;
  const name=$('folderName').value.trim();
- if(!name||name.length>80){$('folderError').textContent='Escribe un nombre de entre 1 y 80 caracteres.';$('folderError').hidden=false;return;}
+ const max=$('folderName').maxLength;
+ if(!name||name.length>max){$('folderError').textContent='Escribe un nombre de entre 1 y '+max+' caracteres.';$('folderError').hidden=false;return;}
  $('folderError').hidden=true;
- try{if(await mutateProjectFolders({command:state.folderEditing?'rename':'create',...(state.folderEditing?{id:state.folderEditing}:{}),name}))$('folderDialog').close();}
+ try{if(await (state.renamingProject?renameProject(name):mutateProjectFolders({command:state.folderEditing?'rename':'create',...(state.folderEditing?{id:state.folderEditing}:{}),name})))$('folderDialog').close();}
  catch(error){if(!error.cancelled){$('folderError').textContent=error.message;$('folderError').hidden=false;}}
 };
-$('deleteFolder').onclick=safe(async()=>{const folder=currentFolder();if(!folder||folderProjects(folder.id).length||state.folderBusy)return;await mutateProjectFolders({command:'delete',id:folder.id});});
+function askConfirm(title,text,action){
+ $('confirmTitle').textContent=title;$('confirmText').textContent=text;$('confirmOk').textContent=action;
+ return new Promise(resolve=>{const d=$('confirmDialog');d.returnValue='';d.onclose=()=>resolve(d.returnValue==='ok');d.showModal();});
+}
+$('confirmCancel').onclick=()=>{$('confirmDialog').returnValue='';$('confirmDialog').close();};
+$('confirmOk').onclick=()=>{$('confirmDialog').returnValue='ok';$('confirmDialog').close();};
+$('deleteFolder').onclick=safe(async()=>{
+ const folder=currentFolder();if(!folder||state.folderBusy)return;
+ const count=folderProjects(folder.id).length;
+ if(count&&!await askConfirm('¿Eliminar la carpeta «'+folder.name+'»?','Sus '+count+' '+(count===1?'proyecto vuelve':'proyectos vuelven')+' al inicio sin borrarse.','Eliminar carpeta'))return;
+ await mutateProjectFolders({command:'delete',id:folder.id,release:true});
+});
 $('projectSearch').oninput=drawProjectGrid;$('projectSort').onchange=drawProjectGrid;
 void restoreSession();

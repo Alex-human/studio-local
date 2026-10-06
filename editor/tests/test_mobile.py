@@ -3,9 +3,11 @@ import concurrent.futures
 import copy
 import http.client
 import json
+import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -14,6 +16,7 @@ from unittest.mock import patch, Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'mobile'))
 import server as mobile
+import direct
 
 
 class Mobile(unittest.TestCase):
@@ -41,6 +44,8 @@ class Mobile(unittest.TestCase):
         p['audio'] = [dict(id='music',asset='asset',role='music',start=0,length=240,linked=False,volumeDb=-24,**{'in':0})]
         mobile.project.save(self.path,p)
         self.original = copy.deepcopy(p)
+        idle = patch.object(mobile.DirectMedia,'start',lambda self:None)  # Builds run only where a test asks for them.
+        idle.start(); self.addCleanup(idle.stop)
         self.app = mobile.Companion(self.work/'projects',self.work/'runtime')
         self.pid = p['id']
 
@@ -261,9 +266,12 @@ class Mobile(unittest.TestCase):
             server.shutdown(); server.server_close(); thread.join()
 
     def test_direct_plan_reuses_sources_after_cut_and_text_without_rendering(self):
-        with patch.object(self.app.direct,'start'), patch.object(mobile.render,'render',side_effect=AssertionError('must not render montage')):
+        with patch.object(mobile.render,'render',side_effect=AssertionError('must not render montage')):
             first=self.app.query(self.req(action='directPlan'))
             self.assertNotIn(str(self.source),json.dumps(first))
+            media={x['url'] for x in first['clips']+first['audio']}
+            self.assertEqual(set(first['pending']),media,'only what the Mac still has to build is pending')
+            self.assertEqual(set(self.app.direct.queues[1]),{url.rsplit('/',1)[1] for url in media},'opening queues the montage')
             self.assertTrue(self.edit({'type':'splitAt','frame':120})['ok'])
             self.assertTrue(self.edit({'type':'text','kind':'graphics','id':'hook','text':'Cambia sin render'})['ok'])
             second=self.app.query(self.req(action='directPlan'))
@@ -277,8 +285,7 @@ class Mobile(unittest.TestCase):
         p=copy.deepcopy(self.original)
         p['clips']=[dict(p['clips'][0],length=1800,fadeIn=150,fadeOut=150,**{'in':750})]
         p['assets'][0]['duration']=1800
-        with patch.object(self.app.direct,'start'):
-            plan=self.app.direct.plan(p)
+        plan=self.app.direct.plan(p)
         voice=[a for a in plan['audio'] if a['role']=='voice']
         self.assertEqual([round(a['length']) for a in voice],[5,30,25])
         self.assertEqual([a['source'] for a in voice],[25,0,0])
@@ -287,6 +294,34 @@ class Mobile(unittest.TestCase):
         self.assertEqual([a['deClickOffset'] for a in voice],[0,5,35])
         self.assertTrue(all(a['deClickLength']==60 for a in voice))
         self.assertEqual([a['start'] for a in voice],[0,5,35])
+
+    def test_video_plan_splits_clips_at_source_chunks_and_keeps_their_phase(self):
+        p=copy.deepcopy(self.original)
+        p['clips']=[dict(p['clips'][0],length=1800,zoomEnd=1.2,motionOffset=40,**{'in':750})]
+        p['assets'][0]['duration']=1800
+        clips=self.app.direct.plan(p)['clips']
+        self.assertEqual([c['id'] for c in clips],[f'clip:{n}' for n in range(2,9)])
+        self.assertEqual([c['length'] for c in clips],[150,300,300,300,300,300,150])
+        self.assertEqual([c['start'] for c in clips],[0,150,450,750,1050,1350,1650])
+        self.assertEqual([c['in'] for c in clips],[150,0,0,0,0,0,0])
+        self.assertEqual([c['motionOffset']-c['start'] for c in clips],[40]*7,'zoom keeps the phase of the whole clip')
+        self.assertTrue(all(c['motionLength']==1800 and c['base'] for c in clips))
+        self.assertEqual(len({c['url'] for c in clips}),7)
+        # Fractional rates: every piece stays inside its own proxy and the pieces add up to the clip.
+        p['fps']=60000/1001;p['clips'][0].update(length=2000,**{'in':17})
+        clips=self.app.direct.plan(p)['clips']
+        self.assertEqual(sum(c['length'] for c in clips),2000)
+        for c in clips:
+            self.assertGreaterEqual(c['in'],0)
+            self.assertLess((c['in']+c['length']-1)/p['fps'],direct.CHUNK)
+        # The source ends just after a chunk boundary: its tail holds the last real proxy instead of an empty one.
+        p['assets'][0]['duration']=30.2;p['clips'][0].update(length=300,**{'in':1500})
+        clips=self.app.direct.plan(p)['clips']
+        self.assertEqual([c['id'] for c in clips],['clip:2'])
+        # An overlay keeps its entrance phase and never extends past the montage.
+        p['graphics']=[dict(id='over',type='video',asset='asset',start=100,length=900,offset=7,props={},**{'in':0})]
+        layers=self.app.direct.plan(p)['layers']
+        self.assertEqual([(g['start'],g['length'],g['offset']) for g in layers],[(100,200,7)])
 
     def test_direct_proxy_build_is_playable_and_small(self):
         d=self.app.direct
@@ -299,6 +334,67 @@ class Mobile(unittest.TestCase):
         url=d.resource(self.original['assets'][0],audio=True);name=url.rsplit('/',1)[1]
         d.build(name,d.jobs[name]);self.assertLessEqual(mobile.render.probe(d.folder/name)['duration'],30.1)
 
+    def test_chunk_proxy_shows_the_source_at_its_own_position(self):
+        source=self.work/'long.mp4'
+        mobile.render.run(['-v','error','-f','lavfi','-i','testsrc2=size=160x90:rate=30:duration=25','-c:v','libx264','-pix_fmt','yuv420p',source])
+        asset=dict(self.original['assets'][0],path=str(source),duration=25,audio=False)
+        d=self.app.direct
+        name=d.resource(asset,start=10).rsplit('/',1)[1]
+        d.build(name,d.jobs[name])
+        built=mobile.render.probe(d.folder/name)
+        self.assertAlmostEqual(built['duration'],10,places=1)
+        def frame(path,at):
+            raw=mobile.render.run(['-v','error','-ss',at,'-i',path,'-frames:v','1','-f','rawvideo','-pix_fmt','gray','-'])
+            return mobile.render.np.frombuffer(raw,dtype=mobile.render.np.uint8).astype(int)
+        for at in (0,2.5,9.9):
+            shown=frame(d.folder/name,at)
+            same=abs(shown-frame(source,10+at)).mean();other=abs(shown-frame(source,10+at+.5)).mean()
+            self.assertLess(same*3,other,f'chunk time {at} must show source time {10+at}')
+        tail=d.resource(asset,start=20).rsplit('/',1)[1]
+        d.build(tail,d.jobs[tail])
+        self.assertAlmostEqual(mobile.render.probe(d.folder/tail)['duration'],5,places=1)
+
+    def test_playhead_goes_first_and_one_background_build_leaves_a_worker_free(self):
+        d=self.app.direct;asset=dict(self.original['assets'][0],duration=100)
+        a,b,c=(d.resource(asset,start=n).rsplit('/',1)[1] for n in (0,10,20))
+        d.queue(2,[a,b,c],1);d.queue(1,[b,'/native/unregistered.mp4']);d.queue(0,[c])
+        self.assertEqual(d.queues,[[c],[b],[a]],'a tier keeps registered media only, up to its limit')
+        self.assertEqual(d.take(),(c,0))
+        self.assertEqual(d.take(),(b,1))
+        d.background=True
+        self.assertEqual(d.take(),(None,0),'a second background build would leave no worker for the playhead')
+        d.queue(0,['/native/'+a])
+        self.assertEqual(d.take(),(a,0),'the playhead is served while a background build runs')
+        d.background=False
+        self.assertEqual(d.take(),(None,0),'media taken from one tier is not built again from another')
+
+    def test_cache_drops_the_longest_unused_first_and_nothing_just_used(self):
+        d=self.app.direct;now=time.time()
+        for n,age in enumerate((4000,3000,60,30,10)):
+            path=d.folder/f'{n:032x}.mp4'
+            with path.open('wb') as file:file.truncate(900*1024**2)  # Sparse: no disk is written.
+            os.utime(path,(now-age,now-age))
+        d.prune()
+        self.assertEqual(sorted(p.name[31] for p in d.folder.glob('*.mp4')),['2','3','4'])
+
+    def test_library_prepares_short_montages_whole_and_long_ones_by_their_first_minute(self):
+        d=self.app.direct
+        self.app.prepare(list(self.app.catalog().values()))
+        self.assertEqual(sorted(n[-3:] for n in d.queues[2]),['m4a','mp4'])
+        p=mobile.project.load(self.path)
+        p['assets'][0]['duration']=2000;p['clips'][0]['length']=30000;p['graphics']=[]
+        mobile.project.save(self.path,p)
+        self.app.prepare(list(self.app.catalog().values()))
+        self.assertEqual(sorted(n[-3:] for n in d.queues[2]),['m4a']*3+['mp4']*7)
+        d.queue(1,d.queues[2])
+        with patch.object(self.app,'prepare'):
+            self.app.query({'action':'library'})
+        self.assertEqual(d.queues[1],[],'leaving a montage stops preparing the rest of it')
+        self.source.with_name('gone.mp4').write_bytes(b'');p['assets'][0]['path']=str(self.source.with_name('gone.mp4'))
+        mobile.project.save(self.path,p);self.source.with_name('gone.mp4').unlink()
+        self.app.prepare(list(self.app.catalog().values()))
+        self.assertEqual(d.queues[2],[],'a montage without its source does not break the library')
+
     def test_unreadable_source_does_not_block_the_queue(self):
         from subprocess import TimeoutExpired
         from direct import transcode
@@ -307,10 +403,14 @@ class Mobile(unittest.TestCase):
         def build(name,spec):
             if spec['kind']=='video':raise TimeoutExpired('metadata',10)
             (d.folder/name).write_bytes(b'complete')
-        d.running=True
+        d.queue(0,[video,audio]);d.workers=1
         with patch.object(d,'build',side_effect=build):d.work()
+        self.assertEqual((d.workers,d.queues[0]),(0,[]))
         result=d.status([video,audio])
-        self.assertEqual(result['failed'],[video]);self.assertEqual(result['ready'],[audio]);self.assertEqual(result['remaining'],0)
+        self.assertEqual(result['failed'],[video]);self.assertEqual(result['ready'],[audio])
+        self.assertEqual(d.queues[0],[],'a failed source is not rebuilt behind the report')
+        self.assertEqual(d.status([video])['failed'],[],'a failure is reported once')
+        self.assertEqual(d.queues[0],[video.rsplit('/',1)[1]],'asking again retries it')
         with patch('direct.subprocess.run',return_value=SimpleNamespace(returncode=0)) as run:
             transcode(['-version'],30)
             self.assertEqual(run.call_args.kwargs['timeout'],150)

@@ -23,7 +23,7 @@ import project
 import project_library
 import render
 import sync
-from direct import DirectMedia
+from direct import DirectMedia, spans
 
 ID = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
 
@@ -106,16 +106,25 @@ class Companion:
         action = req.get('action')
         if action == 'library':
             library = project_library.load(self.projects)
+            catalog = list(self.catalog().values())
+            self.direct.queue(1, [])  # Leaving a montage stops preparing the rest of it.
+            threading.Thread(target=self.prepare, args=(catalog,), daemon=True).start()
             return {'folders': library['folders'], 'projects': [dict(id=p['id'], name=p['name'], revision=p['revision'],
                 width=p['width'], height=p['height'], duration=project.duration(p)/p['fps'],
-                folder=library['assignments'].get(p['id'])) for _, p in self.catalog().values()]}
+                folder=library['assignments'].get(p['id'])) for _, p in catalog]}
         if action == 'state':
             return self.state(req['project'], req.get('revision'))
         if action == 'warm':
             return self.warm(req['project'], req['revision'], req['frame'])
         if action == 'directPlan':
             _, p = self.read(req['project'], integer(req['revision']))
-            return self.direct.plan(p)
+            plan = self.direct.plan(p)
+            if plan:
+                at = integer(req.get('frame', 0))/p['fps']
+                # From the playhead onwards, then what lies behind it.
+                plan['pending'] = self.direct.missing(url for _, _, url in sorted(spans(plan), key=lambda s: (s[1] <= at, s[0])))
+                self.direct.queue(1, plan['pending'])
+            return plan
         if action == 'directStatus':
             return self.direct.status(req['urls'])
         if action == 'receipt':
@@ -124,6 +133,18 @@ class Companion:
             return {'status': 'processing' if req['requestId'] in self.active else 'unknown' if row is None else 'pending' if row[0] is None else 'done',
                     'response': json.loads(row[0]) if row and row[0] else None}
         return self.mutate(req)
+
+    def prepare(self, catalog):
+        """Short montages are ready before they are opened; long ones, their first minute. Newest first."""
+        urls = []
+        for _, p in sorted(catalog, key=lambda item: item[0].stat().st_mtime, reverse=True):
+            try:
+                plan = self.direct.plan(p)
+            except (OSError, KeyError, ValueError):
+                continue  # A montage with an unreadable source still lists; opening it reports the problem.
+            if plan:
+                urls += [url for start, _, url in sorted(spans(plan)) if plan['frames'] <= 900*plan['fps'] or start < 60]
+        self.direct.queue(2, urls, 1200)
 
     def mutate(self, req):
         rid = identifier(req.get('requestId'))

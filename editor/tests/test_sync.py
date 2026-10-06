@@ -43,3 +43,14 @@ class SyncTests(unittest.TestCase):
  def test_poll_readonly(self):
   self.assertFalse(editor.dispatch(dict(action='poll',project=str(self.path),revision=0))['changed']);self.ops(0,[dict(op='mixer',values={'music':-15})]);before=self.path.read_bytes()
   self.assertTrue(editor.dispatch(dict(action='poll',project=str(self.path),revision=0))['changed']);self.assertEqual(before,self.path.read_bytes())
+ def test_rename_preserves_remote_edit_and_rejects_competing_name(self):
+  original=project.load(self.path)
+  self.ops(0,[dict(op='mixer',values={'music':-18})])
+  p=self.ops(0,[dict(op='settings',values={'name':'Nombre nuevo'})])
+  self.assertEqual(p['name'],'Nombre nuevo');self.assertEqual(p['mixer']['music'],-18)
+  for key in ('id','assets','clips','audio','graphics','captions'):self.assertEqual(p[key],original[key])
+  before=self.path.read_bytes()
+  with self.assertRaises(sync.Conflict):self.ops(0,[dict(op='settings',values={'name':'Otro nombre'})])
+  self.assertEqual(self.path.read_bytes(),before)
+  p=editor.dispatch(dict(action='undo',project=str(self.path)))['project']
+  self.assertEqual(p['name'],original['name']);self.assertEqual(p['mixer']['music'],-18)

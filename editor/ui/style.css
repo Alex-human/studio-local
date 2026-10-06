@@ -28,3 +28,6 @@
 .duplicate-positions{display:flex;gap:8px}.duplicate-positions button{font-size:11px;padding:6px 9px}#duplicateSummary{color:#b9dca8;line-height:1.6}#duplicateStart{border:1px solid var(--edge);background:#0e1319;color:var(--text);border-radius:5px;padding:8px}
 
 .media.has-overlay{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px 10px}.media-overlay{grid-column:2;justify-self:start;font-size:11px;padding:4px 8px}.clip.overlays{background:#24564f;border-color:#528f80;color:#e1fff2}
+
+.project-trash{font-size:10px;padding:6px 7px;color:#a98f8f;background:transparent;border-color:transparent}.project-trash:hover{color:#ff9d9d;background:#3a2626}#confirmDialog p{color:#9baab7;line-height:1.6;margin:10px 0 18px}
+.project-rename{padding:6px 8px;font-size:16px;line-height:1;color:#aebcaf;background:transparent;border-color:transparent}.project-rename:hover{color:var(--accent);background:#29342c}.project-card-footer{flex-wrap:wrap}#renameProject{flex-shrink:0;font-size:11px}

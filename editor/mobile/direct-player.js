@@ -36,8 +36,8 @@ export function envelopePoints(item,from,end) {
   }
   return result;
 }
-function mediaReady(media,time) {
-  return media.readyState>=2 && !media.seeking && Math.abs(media.currentTime-time)<.12;
+function mediaReady(media,time,slack=.12) {
+  return media.readyState>=2 && !media.seeking && Math.abs(media.currentTime-time)<slack;
 }
 async function waitMedia(media,test,current=()=>true) {
   const deadline=performance.now()+20000;
@@ -52,7 +52,7 @@ async function waitMedia(media,test,current=()=>true) {
 export class DirectPlayer {
   constructor(viewer,query,onFrame,onState,onError) {
     Object.assign(this,{viewer,query,onFrame,onState,onError,frame:0,rate:1,generation:0,playing:false});
-    this.videos=new Map();this.images=new Map();this.audio=new Map();this.pending=new Map();this.ready=new Set();this.sources=new Map();
+    this.videos=new Map();this.images=new Map();this.audio=new Map();this.pending=new Map();this.raw=new Map();this.ready=new Set();this.sources=new Map();
     this.canvas=document.createElement('canvas');this.canvas.id='composition';this.canvas.hidden=true;viewer.append(this.canvas);
     this.ctx=this.canvas.getContext('2d',{alpha:false});
   }
@@ -68,36 +68,44 @@ export class DirectPlayer {
   async load(project,frame) {
     this.stop();this.plan=null;this.frame=frame;
     const generation=this.generation;
-    const plan=await this.query({action:'directPlan',project:project.id,revision:project.revision});
+    const plan=await this.query({action:'directPlan',project:project.id,revision:project.revision,frame:Math.round(frame)});
     if(generation!==this.generation)return;
     this.plan=plan;
     if(!plan){this.canvas.hidden=true;return false;}
+    for(const {url} of [...plan.clips,...plan.layers,...plan.audio])plan.pending.includes(url)?this.ready.delete(url):this.ready.add(url);
     this.canvas.width=plan.width;this.canvas.height=plan.height;this.canvas.hidden=false;
     this.canvas.style.aspectRatio=`${plan.width}/${plan.height}`;
     this.draw();return true;
   }
   visual(frame=this.frame,ahead=0) {
     const end=frame+ahead*this.plan.fps;
-    return [...this.plan.clips.map(c=>({...c,base:true})),...this.plan.layers].filter(x=>x.start<=end&&x.start+x.length>frame);
+    return [...this.plan.clips,...this.plan.layers].filter(x=>x.start<=end&&x.start+x.length>frame);
   }
+  // The next minute, sound first: it is quick to prepare and playing waits for it.
+  ahead(frame) {return [...this.audible(frame/this.plan.fps,60),...this.visual(frame,60)].map(x=>x.url);}
   audible(t=this.frame/this.plan.fps,ahead=0) {
     return this.plan.audio.filter(x=>x.start<=t+ahead&&x.start+x.length>t);
   }
-  async ensure(urls,generation) {
-    const missing=[...new Set(urls)].filter(url=>!this.ready.has(url));
-    if(!missing.length)return;
-    const deadline=performance.now()+180000;
-    while(missing.some(url=>!this.ready.has(url))) {
-      if(generation!==this.generation)return;
-      const result=await this.query({action:'directStatus',urls:missing});
-      for(const url of result.ready)this.ready.add(url);
-      if(result.failed.length)throw new Error('No se pudo preparar un medio ligero. Revisa la fuente en el Mac.');
+  // Waits for urls; ahead only tells the Mac what to prepare next.
+  async ensure(urls,generation,ahead=[]) {
+    const pending=list=>[...new Set(list)].filter(url=>!this.ready.has(url));
+    const missing=pending(urls),deadline=performance.now()+180000;
+    for(;;) {
+      const wanted=pending([...missing,...ahead]).slice(0,100);
+      if(!wanted.length||generation!==this.generation)return;
+      const request=this.query({action:'directStatus',urls:wanted}).then(result=>{for(const url of result.ready)this.ready.add(url);return result;});
+      if(!pending(missing).length){request.catch(()=>{});return;}
+      const result=await request;
+      if(result.failed.some(url=>missing.includes(url)))throw new Error('No se pudo preparar un medio ligero. Revisa la fuente en el Mac.');
       if(performance.now()>deadline)throw new Error('El Mac sigue preparando los medios iniciales. Vuelve a abrir el proyecto en unos minutos.');
-      if(missing.some(url=>!this.ready.has(url)))await sleep(500);
+      if(!pending(missing).length)return;
+      await sleep(150);
     }
   }
   key(item) {return `${item.base?'base':'layer'}:${item.id}`;}
   sourceTime(item,frame) {return Math.max(0,((item.in||0)+(frame-item.start)*(item.speed||1))/this.plan.fps);}
+  // Past the end of its proxy an item holds the last frame, as the export does.
+  target(item,frame,media) {return Math.max(.001,Math.min(this.sourceTime(item,frame),media.duration-1/this.plan.fps));}
   async picture(item,frame,generation=this.generation) {
     if(generation!==this.generation||!this.plan)return null;
     if(!item.base&&item.type!=='video') {
@@ -112,20 +120,30 @@ export class DirectPlayer {
     if(!slot) {
       const media=document.createElement('video');media.muted=true;media.playsInline=true;media.preload='auto';
       media.className='source-video';media.src=item.url;this.viewer.append(media);
-      slot={media,url:item.url};this.videos.set(key,slot);
+      slot={media,url:item.url,fresh:true};this.videos.set(key,slot);
     }
     const media=slot.media;
     if(!await waitMedia(media,()=>media.readyState>=1,()=>generation===this.generation))return null;
-    const time=Math.min(this.sourceTime(item,frame),Math.max(0,media.duration-1/this.plan.fps));
-    if(Math.abs(media.currentTime-time)>.2/this.plan.fps)media.currentTime=time;
+    const time=this.target(item,frame,media);
+    // A new element always seeks: iOS loads frames on seek or play, not on preload.
+    if(slot.fresh||Math.abs(media.currentTime-time)>.2/this.plan.fps)media.currentTime=time;
+    slot.fresh=false;
     if(!await waitMedia(media,()=>mediaReady(media,time),()=>generation===this.generation))return null;return media;
+  }
+  // Sound downloads as soon as its place is near; decoding waits for the audio context the first tap creates.
+  bytes(url) {
+    if(!this.raw.has(url))this.raw.set(url,fetch(url).then(response=>{
+      if(!response.ok){this.ready.delete(url);throw new Error('No se pudo cargar el audio.');}
+      return response.arrayBuffer();
+    }).catch(e=>{this.raw.delete(url);throw e;}));
+    return this.raw.get(url);
   }
   async buffer(url) {
     if(this.audio.has(url)){const value=this.audio.get(url);this.audio.delete(url);this.audio.set(url,value);return value;}
     if(!this.pending.has(url)) {
       const promise=(async()=>{
-        const response=await fetch(url);if(!response.ok){this.ready.delete(url);throw new Error('No se pudo cargar el audio.');}
-        const value=await this.audioContext.decodeAudioData(await response.arrayBuffer());
+        const data=await this.bytes(url);this.raw.delete(url);
+        const value=await this.audioContext.decodeAudioData(data);
         this.audio.set(url,value);this.pruneAudio();return value;
       })().finally(()=>this.pending.delete(url));this.pending.set(url,promise);
     }
@@ -138,7 +156,7 @@ export class DirectPlayer {
   }
   async prepare(frame,generation,audio=true) {
     const visual=this.visual(frame),audible=audio?this.audible(frame/this.plan.fps):[];
-    await this.ensure([...visual,...audible].map(x=>x.url),generation);
+    await this.ensure([...visual,...audible].map(x=>x.url),generation,this.ahead(frame));
     if(generation!==this.generation)return;
     await Promise.all(visual.map(item=>this.picture(item,frame,generation)));
     if(audio)await Promise.all(audible.map(x=>this.buffer(x.url)));
@@ -204,26 +222,32 @@ export class DirectPlayer {
   prefetch() {
     if(!this.plan||this.prefetching)return;
     const generation=this.generation,frame=this.frame;
-    const visual=this.visual(frame,4),audible=this.audioContext?this.audible(frame/this.plan.fps,16):[];
+    const visual=this.visual(frame,4),audible=this.audible(frame/this.plan.fps,16);
     const keys=new Set(visual.map(x=>this.key(x)));
     for(const [key,{media}] of this.videos)if(!keys.has(key)){media.pause();media.removeAttribute('src');media.load();media.remove();this.videos.delete(key);}
     const imageURLs=new Set(visual.map(x=>x.url));
     for(const url of this.images.keys())if(this.images.size>48&&!imageURLs.has(url))this.images.delete(url);
+    for(const url of this.raw.keys())if(!audible.some(x=>x.url===url))this.raw.delete(url);
     this.prefetching=true;
     (async()=>{
-      await this.ensure([...visual,...audible].map(x=>x.url),generation);
+      await this.ensure([...audible,...visual].map(x=>x.url),generation,this.ahead(frame));
       if(generation!==this.generation)return;
-      await Promise.all([...visual.filter(x=>x.start>frame).map(x=>this.picture(x,x.start,generation)),...audible.map(x=>this.buffer(x.url))]);
+      const sound=x=>this.audioContext?this.buffer(x.url):this.bytes(x.url);
+      await Promise.all(audible.filter(x=>x.start<=frame/this.plan.fps).map(sound));  // What pressing play waits for goes first.
+      if(generation!==this.generation)return;
+      await Promise.all([...audible.map(sound),...visual.filter(x=>x.start>frame).map(x=>this.picture(x,x.start,generation))]);
     })().catch(()=>{/* A current-media miss is reported by play/seek; speculative misses do not interrupt it. */}).finally(()=>{this.prefetching=false;});
   }
   tick() {
     if(!this.playing)return;
     this.frame=this.clock();const visible=this.visual();
-    const missing=visible.some(x=>!this.ready.has(x.url)||(!x.base&&x.type!=='video'&&!this.images.get(x.url)?.image.naturalWidth)||((x.base||x.type==='video')&&(!this.videos.has(this.key(x))||!mediaReady(this.videos.get(this.key(x)).media,this.sourceTime(x,this.frame))))) || this.audible().some(x=>!this.audio.has(x.url));
+    // A video may trail the clock by 120 ms of real time at any speed: a proxy that has just started is not a missing one.
+    const late=x=>{const media=this.videos.get(this.key(x))?.media;return !media||!mediaReady(media,this.target(x,this.frame,media),.12*this.rate);};
+    const missing=visible.some(x=>!this.ready.has(x.url)||(x.base||x.type==='video'?late(x):!this.images.get(x.url)?.image.naturalWidth))||this.audible().some(x=>!this.audio.has(x.url));
     if(missing){this.play(this.frame,this.rate);return;}
     for(const item of visible)if(item.base||item.type==='video') {
       const media=this.videos.get(this.key(item)).media;
-      if(media.paused){media.playbackRate=this.rate;media.play().catch(e=>{this.stop();this.onError(e);});}
+      if(media.paused&&!media.ended){media.playbackRate=this.rate;media.play().catch(e=>{this.stop();this.onError(e);});}
     }
     for(const [key,{media}] of this.videos)if(!visible.some(x=>this.key(x)===key))media.pause();
     this.draw();this.onFrame(Math.round(this.frame));this.schedule();
