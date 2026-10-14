@@ -13,6 +13,16 @@ class UpdateTests(unittest.TestCase):
   with patch.object(update,'ROOT',self.root),patch.object(update,'running',return_value=True):
    with self.assertRaises(RuntimeError):update.promote(self.stage)
   self.assertTrue((self.root/'Studio Local.app/old').exists());self.assertTrue(self.stage.exists())
+ def test_fresh_install_does_not_require_process_visibility(self):
+  import shutil
+  shutil.rmtree(self.root/'Studio Local.app')
+  with patch.object(update,'ROOT',self.root),patch.object(update.subprocess,'run') as processes:
+   update.promote(self.stage);processes.assert_not_called()
+  self.assertTrue((self.root/'Studio Local.app/new').exists())
+ def test_existing_install_keeps_process_check(self):
+  from types import SimpleNamespace
+  with patch.object(update,'ROOT',self.root),patch.object(update.subprocess,'run',return_value=SimpleNamespace(returncode=2)):
+   with self.assertRaises(RuntimeError):update.running()
  def test_closed_bundle_promotes(self):
   with patch.object(update,'ROOT',self.root),patch.object(update,'running',return_value=False):update.promote(self.stage)
   self.assertTrue((self.root/'Studio Local.app/new').exists());self.assertEqual((self.root/'runtime/probe').read_text(),'probe');self.assertFalse(self.stage.exists())

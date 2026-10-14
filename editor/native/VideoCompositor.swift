@@ -115,6 +115,9 @@ final class PlaybackVideoCompositor:NSObject,AVVideoCompositing {
                 } catch { request.finish(with:error);return }
                 result=image.composited(over:result).cropped(to:rect)
             }
+            // The player shows these frames as BT.709 video (gamma 1.961), lighter than the paused sRGB
+            // frame: encode them for that curve so playback and pause look the same.
+            result=result.applyingFilter("CISRGBToneCurveToLinear").applyingFilter("CIGammaAdjust",parameters:["inputPower":1/1.961])
             self.context.render(result,to:buffer,bounds:rect,colorSpace:self.colorSpace)
             self.lock.lock();let expired=token != self.generation;self.lock.unlock()
             if expired { request.finishCancelledRequest() } else { request.finish(withComposedVideoFrame:buffer) }
@@ -241,11 +244,14 @@ struct PlaybackVideoBuilder {
             let track=lanes[lane].track,at=time(Double(start)),duration=time(Double(length))
             // AVFoundation can choose the preceding sample at exact retimed boundaries.
             // One composition tick breaks that numerical tie without shifting a frame.
-            let sourceStart=CMTimeAdd(time(sourceIn),overlay ? CMTime(value:1,timescale:600000) : .zero)
+            // A base clip from a file at another frame rate shows, like the exporter's `fps=…:round=near`,
+            // the last source picture stamped before the middle of each output frame.
+            let retime=spec["retime"] as? Bool == true
+            let sourceStart=CMTimeAdd(time(sourceIn),overlay ? CMTime(value:1,timescale:600000) : retime ? CMTimeSubtract(time(0.5),CMTime(value:1,timescale:600000)) : .zero)
             let sourceEnd=CMTimeRangeGetEnd(source.timeRange)
             let available=CMTimeSubtract(sourceEnd,sourceStart)
             let requested=time(Double(length)*speed)
-            let inputDuration=overlay ? CMTimeMinimum(requested,available) : requested
+            let inputDuration=overlay || retime ? CMTimeMinimum(requested,available) : requested
             // Validation accepts an overlay up to one frame longer than its file (a rounded
             // length) and the exporter holds its last frame there. Only more is an error.
             let missing=CMTimeSubtract(requested,inputDuration).seconds

@@ -73,6 +73,48 @@ def instagram_hook(draw, content, x, y, size, width, color, accent, box=False):
     for line,face,cy in rows:draw.text((x,cy),line,font=face,fill=color,anchor='mm')
     draw.line(underline,fill=accent,width=stroke)
 
+@lru_cache(maxsize=128)
+def sticker_hook_parts(content, x, y, size, width):
+    """Instagram text sticker, with one black card per line: greedy lines, one padded black card per line."""
+    face=ImageFont.truetype(str(ASSETS/'fonts/editorial/BarlowCondensed-Medium.ttf'),max(8,int(size)));lines=[]
+    for paragraph in content.splitlines():
+        line=''
+        for word in paragraph.split():
+            if line and face.getlength(line+' '+word)>width:lines.append(line);line=word
+            else:line=(line+' '+word).strip()
+        if line:lines.append(line)
+    lines=lines or [' '];pitch,height,radius=size*1.155,size*1.715,size*.19
+    half=[face.getlength(line)/2+size*.405 for line in lines]
+    for i in range(len(half)-1):  # near-equal neighbours share one edge
+        if abs(half[i]-half[i+1])<radius*1.5:half[i]=half[i+1]=max(half[i],half[i+1])
+    tops=[y-(height+(len(lines)-1)*pitch)/2+i*pitch for i in range(len(lines))]
+    edges=sorted({*tops,*[top+height for top in tops]});bands=[]
+    for a,b in zip(edges,edges[1:]):  # cards overlap; the wider one wins
+        w=max(h for top,h in zip(tops,half) if top<=a and b<=top+height)
+        if bands and bands[-1][2]==x+w:bands[-1]=(x-w,bands[-1][1],x+w,b)
+        else:bands.append((x-w,a,x+w,b))
+    return face,[(line,top+size*1.207) for line,top in zip(lines,tops)],bands,radius
+
+def sticker_outline(bands, radius):
+    """Outline of stacked bands (left, top, right, bottom) as complex points: rounded outside, filleted where the width steps."""
+    corners=[complex(r,v) for l,t,r,b in bands for v in (t,b)]+[complex(l,v) for l,t,r,b in reversed(bands) for v in (b,t)];points=[]
+    for i,cur in enumerate(corners):
+        prev,nxt=corners[i-1],corners[(i+1)%len(corners)]
+        din,dout=abs(cur-prev),abs(nxt-cur);rad=min(radius,din/2,dout/2)
+        a,b=cur-(cur-prev)/din*rad,cur+(nxt-cur)/dout*rad;c=a+b-cur
+        points+=[c+(a-c)*math.cos(q)+(b-c)*math.sin(q) for q in (math.pi/2*k/6 for k in range(7))]
+    return points
+
+def sticker_hook(layer, content, x, y, size, width, color):
+    face,rows,bands,radius=sticker_hook_parts(content,x,y,size,width)
+    left,top=math.floor(min(b[0] for b in bands)),math.floor(bands[0][1])
+    w,h=math.ceil(max(b[2] for b in bands))-left+1,math.ceil(bands[-1][3])-top+1
+    mask=Image.new('L',(w*4,h*4))  # supersampled: Pillow polygons are not antialiased; vertices rounded so a sprite's integer shift cannot move one across a subsample
+    ImageDraw.Draw(mask).polygon([(round((p.real-left)*4,6),round((p.imag-top)*4,6)) for p in sticker_outline(bands,radius)],fill=255)
+    layer.paste((0,0,0,255),(left,top),mask.resize((w,h),Image.BOX))
+    draw=ImageDraw.Draw(layer)
+    for line,base in rows:draw.text((x,base),line,font=face,fill=color,anchor='ms')
+
 def title_layer(size, props, enter=1, origin=(0,0), canvas_width=None):
     """Canonical title glyphs, also used on a small transparent preview surface."""
     w=canvas_width or size[0];sc=w/1920
@@ -83,6 +125,7 @@ def title_layer(size, props, enter=1, origin=(0,0), canvas_width=None):
     color=props.get('color','#ffffff');font_size=float(props.get('size',72))*sc
     if props.get('style')=='instagram':
         instagram_hook(d,title,x,y,font_size,w*.86,color,accent,props.get('box',False))
+    elif props.get('style')=='sticker':sticker_hook(layer,title,x,y,font_size,w*.86,color)
     else:
         weight=props.get('weight',580);font_size=fit_text(title,w*.86,font_size,weight)
         shadow=Image.new('RGBA',size)
@@ -122,6 +165,9 @@ def text_sprite(size, props=None, caption=None):
                 last=i==len(rows)-1;bounds(x,cy,line,font_size,600 if last else 400,last)
             boxes.append((underline[0]-stroke,underline[1]-stroke,underline[2]+stroke,underline[3]+stroke))
             if card:boxes.append((card[0]-1,card[1]-1,card[2]+1,card[3]+1))
+        elif props.get('style')=='sticker':
+            face,rows,bands,_=sticker_hook_parts(title,x,y,font_size,w*.86)
+            boxes+=[(l-1,t-1,r+2,b+2) for l,t,r,b in bands]+[d.textbbox((x,base),line,font=face,anchor='ms') for line,base in rows]
         else:
             weight=props.get('weight',580);font_size=fit_text(title,w*.86,font_size,weight)
             bounds(x,y,title,font_size,weight)

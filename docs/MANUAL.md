@@ -169,3 +169,10 @@ En **Medios**, «Añadir efecto de sonido» abre `../assets/audio/Biblioteca/Efe
 Los archivos externos elegidos desde estos dos botones se copian a la biblioteca y quedan disponibles en otros proyectos. También puedes guardar nuevos audios directamente en esas carpetas. Al abrir el selector se incorporan nuevos archivos de `assets/audio/{sfx,music}`, `assets/sfx/editorial` y `editor/assets/sfx`, conservando originales y rutas ya utilizadas. `../assets/audio/catalog.json` asigna nombres y carpetas; el índice interno evita copias repetidas. La música añadida desde su botón empieza a −24 dB con fundidos de 0,5 s; ajusta su volumen en el inspector. Los efectos mantienen su nivel original. El importador genérico conserva su comportamiento.
 
 CLI: `{"action":"audioLibrary","role":"sfx"}` o `"music"` devuelve la carpeta actualizada sin modificar un proyecto. Un `import` con `libraryRole:"sfx"` o `"music"` conserva el audio en la biblioteca y lo inserta con ese rol. Las revisiones y el historial siguen aplicándose.
+
+## Actualización 1.14.4
+
+- Gancho **Sticker de Instagram** (`style:"sticker"`): letra condensada blanca y una tarjeta negra por línea, con Barlow Condensed incluida bajo OFL. Mantiene el texto editable.
+- El color de reproducción nativa se aproxima al fotograma pausado y a la exportación; la columna de nombres de pista cubre los bloques al desplazar el timeline.
+- `preparePlayback` admite `nativeRetime`: un vídeo principal con fps diferentes a los del proyecto se reproduce por muestreo nativo equivalente al render. Sin esa capacidad conserva la preparación por tramos.
+- La interfaz móvil usa WebCodecs, calidad adaptativa y audio compatible con WebKit; permite tocar el timeline, borrar y reescribir textos. Lee `editor/mobile/README.md` para su configuración y límites.

@@ -16,6 +16,7 @@ def verified_stage(value):
     return stage
 
 def running():
+    if not (ROOT/'Studio Local.app').exists():return False
     code=subprocess.run(['/usr/bin/pgrep','-x','StudioLocal'],stdout=subprocess.DEVNULL).returncode
     if code not in (0,1):raise RuntimeError('No se pudo comprobar si Studio Local está abierto')
     return code==0

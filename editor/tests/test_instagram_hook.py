@@ -49,6 +49,22 @@ class InstagramHookTests(unittest.TestCase):
         self.assertEqual(len(rows),2)
         sprite,rect=graphics.text_sprite(size,props);actual=Image.new('RGBA',size);actual.alpha_composite(sprite,tuple(rect[:2]))
         np.testing.assert_array_equal(layer,np.asarray(actual))
+    def test_sticker_hook_cards_each_line_and_matches_native_sprite(self):
+        size=(1080,1920);sc=1080/1920;props=dict(text='La pregunta que más cierres en llamada me ha dado',style='sticker',x=960,y=590,size=141,color='#ffffff')
+        p=copy.deepcopy(self.p);p['graphics'][0]['props']=props;project.validate(p)
+        _,rows,bands,_=graphics.sticker_hook_parts(props['text'],960*sc,590*sc,141*sc,1080*.86)
+        self.assertEqual(' '.join(line for line,_ in rows),props['text'])
+        self.assertEqual(len(bands),2)
+        layer=np.asarray(graphics.title_layer(size,props))
+        card=(layer[:,:,3]==255)&(layer[:,:,:3].max(2)==0);white=np.argwhere((layer[:,:,3]==255)&(layer[:,:,:3].min(2)>200))
+        for (left,top,right,bottom),(_,base) in zip(bands,rows):  # every line sits inside its own card
+            ink=white[(white[:,0]>base-40)&(white[:,0]<=base)]
+            self.assertTrue(card[round(base)-20,round(left)+12] and card[round(base)-20,round(right)-12])
+            self.assertGreater(ink[:,1].min(),left);self.assertLess(ink[:,1].max(),right)
+        self.assertFalse(card[round(bands[1][3])-20,round(bands[0][0])+12])  # the shorter line's card is narrower
+        for props in (props,{**props,'size':160,'y':1000}):  # the second lands outline vertices on subsample boundaries
+            sprite,rect=graphics.text_sprite(size,props);actual=Image.new('RGBA',size);actual.alpha_composite(sprite,tuple(rect[:2]))
+            np.testing.assert_array_equal(np.asarray(graphics.title_layer(size,props)),np.asarray(actual))
     def test_weight_and_style_validation(self):
         for values in [{'weight':999},{'style':'unknown'},{'box':'sí'}]:
             p=copy.deepcopy(self.p);p['graphics'][0]['props'].update(values)

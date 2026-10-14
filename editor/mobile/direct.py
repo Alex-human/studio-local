@@ -17,7 +17,7 @@ import preview
 import project
 import render
 
-CHUNK, BLOCK = 10, 30  # Source seconds per video proxy and per audio block.
+CHUNK, BLOCK = 10, 10  # Source seconds per video proxy and per audio block.
 
 
 def transcode(args, seconds):
@@ -55,12 +55,14 @@ class DirectMedia:
         self.background = False
         self.workers = 0
 
-    def resource(self, asset, color=None, audio=False, start=0):
+    def resource(self, asset, color=None, audio=False, start=0, size=640):
         source = Path(asset['path'])
         stat = source.stat()
         kind = 'audio' if audio else asset['kind']
         spec = dict(path=str(source.resolve()), kind=kind, color=color or {}, start=start, lut=None if audio else asset.get('lut'))
-        key = hashlib.sha256(json.dumps([2, spec, stat.st_size, stat.st_mtime_ns], sort_keys=True).encode()).hexdigest()[:32]
+        if size != 640 and kind != 'audio': spec['size'] = size
+        # Generation 4 is what a slow phone link carries: sound in plain MP4 at 96 kb/s, video at 450 kb/s.
+        key = hashlib.sha256(json.dumps([2 if 'size' in spec or kind == 'image' else 4, spec, stat.st_size, stat.st_mtime_ns], sort_keys=True).encode()).hexdigest()[:32]
         name = key + '.' + {'video': 'mp4', 'audio': 'm4a', 'image': 'png'}[kind]
         with self.lock:
             self.jobs.setdefault(name, dict(spec, fps=asset.get('fps'), width=asset.get('width'), height=asset.get('height')))
@@ -121,23 +123,27 @@ class DirectMedia:
             out = Path(work)/name
             if kind == 'image':
                 im = graphics.source_image(spec['path'], Path(spec['path']).stat().st_mtime_ns).copy()
-                im.thumbnail((1280, 1280)); im.save(out)
+                side = max(1280, spec.get('size', 640))
+                im.thumbnail((side, side)); im.save(out)
             elif kind == 'audio':
-                transcode(['-v','error','-ss',start,'-i',spec['path'],'-t',BLOCK,'-map','0:a:0','-vn','-c:a','aac','-b:a','128k','-ar','48000','-movflags','+faststart',out],BLOCK)
+                # Plain MP4: WebKit's decodeAudioData rejects what FFmpeg writes for the .m4a extension.
+                transcode(['-v','error','-ss',start,'-i',spec['path'],'-t',BLOCK,'-map','0:a:0','-vn','-c:a','aac','-b:a','96k','-ar','48000','-movflags','+faststart','-f','mp4',out],BLOCK)
             else:
                 # A constant rate from the chunk's own zero: every proxy starts on a frame and lasts CHUNK.
                 rate=cadence(spec['fps'])
-                filters = ['scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2',f'fps={rate}:start_time=0','setsar=1',*render.lut_filter(spec['lut'])]
+                side=spec.get('size',640)
+                scale=min(1,side/max(spec['width'],spec['height']))
+                w,h=max(2,round(spec['width']*scale/2)*2),max(2,round(spec['height']*scale/2)*2)
+                filters = [f'scale={w}:{h}',f'fps={rate}:start_time=0','setsar=1',*render.lut_filter(spec['lut'])]
                 if color:
                     filters += [f"eq=brightness={color.get('exposure',0)*.12}:contrast={color.get('contrast',1)}:saturation={color.get('saturation',1)}"]
                     t = color.get('temperature',0)
                     if t: filters += [f'colorbalance=rs={t*.12}:bs={-t*.12}:rm={t*.07}:bm={-t*.07}']
                 source = ['-ss',start,'-t',CHUNK+1,'-i',spec['path']]
+                bitrate,maxrate,bufsize={640:('450k','650k','1300k'),1280:('2M','3M','6M')}.get(side,('8M','12M','24M'))
                 output = ['-frames:v',math.ceil(CHUNK*rate),'-map','0:v:0','-an',
-                            '-c:v','h264_videotoolbox','-b:v','850k','-maxrate','1100k','-bufsize','2200k',
+                            '-c:v','h264_videotoolbox','-b:v',bitrate,'-maxrate',maxrate,'-bufsize',bufsize,
                             '-g',max(1,round(rate/2)),'-pix_fmt','yuv420p','-movflags','+faststart',out]
-                scale=min(1,640/max(spec['width'],spec['height']))
-                w,h=max(2,round(spec['width']*scale/2)*2),max(2,round(spec['height']*scale/2)*2)
                 hardware=[f'scale_vt=w={w}:h={h}','hwdownload',f"format={pixel(spec['path'])}",*filters[1:]]
                 try:
                     transcode(['-v','error','-hwaccel','videotoolbox','-hwaccel_output_format','videotoolbox_vld',*source,'-vf',','.join(hardware),*output],CHUNK)
@@ -147,12 +153,12 @@ class DirectMedia:
             os.replace(out, dest)
 
     def prune(self):
-        """Above 2 GiB the longest unused go first; nothing used in the last two minutes."""
+        """Above 6 GiB the longest unused go first; nothing used in the last two minutes."""
         try:
             files=sorted((f.stat().st_mtime,f.stat().st_size,f.path) for f in os.scandir(self.folder) if f.is_file() and f.name.endswith(('.mp4','.m4a','.png','.wav')))
             total=sum(size for _,size,_ in files)
             for modified,size,path in files:
-                if total<=2*1024**3 or time.time()-modified<120:break
+                if total<=6*1024**3 or time.time()-modified<120:break
                 total-=size;os.unlink(path)
         except OSError:pass  # A file vanished meanwhile; the next build prunes again.
 
@@ -174,30 +180,32 @@ class DirectMedia:
         failed=[url for url in missing if (self.jobs[url.removeprefix('/native/')] or {'error':True}).pop('error',None)]
         return {'ready': [url for url in dict.fromkeys(urls) if url not in missing], 'failed': failed}
 
-    def pieces(self, item, asset, start, fps, color=None):
+    def pieces(self, item, asset, start, fps, color=None, size=640):
         """Split a video item where its source crosses a chunk, so every piece plays from one small proxy."""
         last=int(max(0,asset['duration']-.5)//CHUNK);done=0
         while done<item['length']:
             source=(item.get('in',0)+done)/fps
             index=min(int((source+1e-9)//CHUNK),last)
             length=item['length']-done if index==last else min(item['length']-done,math.ceil(((index+1)*CHUNK-source)*fps-1e-9))
-            yield dict(item,id=f"{item['id']}:{index}",start=start+done,length=length,url=self.resource(asset,color,start=index*CHUNK),
+            yield dict(item,id=f"{item['id']}:{index}",start=start+done,length=length,url=self.resource(asset,color,start=index*CHUNK,size=size),
                        **{'in':item.get('in',0)+done-index*CHUNK*fps}),done
             done+=length
 
-    def plan(self, p):
+    def plan(self, p, size=640):
+        if type(size) is not int or size not in (640,1280,1920):
+            raise ValueError('Calidad de vista previa no válida')
         visible = [g for g in p['graphics'] if not g.get('hidden')]
         if p.get('ducking') or any(x.get('speed',1)!=1 for k in ('clips','audio','graphics') for x in p[k]) or any(g['type'] not in ('image','video','title') or
                                    g['type']=='title' and set(g.get('keyframes',{}))-{'opacity'} for g in visible):
             return None
         assets = {a['id']: a for a in p['assets']}
-        factor = min(1,640/max(p['width'],p['height']))
+        factor = min(1,size/max(p['width'],p['height']))
         width = round(p['width']*factor/2)*2; height = round(p['height']*factor/2)*2
         fps = p['fps']; total = project.duration(p)
         plan = dict(width=width, height=height, fps=fps, frames=total, clips=[], layers=[], audio=[])
         start = 0
         for clip in p['clips']:
-            for piece,done in self.pieces(clip, assets[clip['asset']], start, fps, clip.get('color')):
+            for piece,done in self.pieces(clip, assets[clip['asset']], start, fps, clip.get('color'),size=size):
                 plan['clips'].append(dict(piece, base=True, motionOffset=clip.get('motionOffset',0)+done, motionLength=clip.get('motionLength',clip['length'])))
             start += clip['length']
         for g in sorted(visible, key=lambda g:g['type']!='video'):
@@ -206,12 +214,12 @@ class DirectMedia:
                 item['url']=self.existing(item.pop('path')); plan['layers'].append(item)
                 continue
             a = assets[g['asset'] if g['type']=='video' else g['props']['asset']]
-            size = dict(sourceWidth=a['width'], sourceHeight=a['height'])
+            source_size = dict(sourceWidth=a['width'], sourceHeight=a['height'])
             if g['type']=='image':
-                plan['layers'].append(dict(g, url=self.resource(a), **size))
+                plan['layers'].append(dict(g, url=self.resource(a,size=size), **source_size))
                 continue
-            for piece,done in self.pieces(dict(g, length=min(g['length'],total-g['start'])), a, g['start'], fps):
-                plan['layers'].append(dict(piece, offset=g.get('offset',0)+done, **size))
+            for piece,done in self.pieces(dict(g, length=min(g['length'],total-g['start'])), a, g['start'], fps,size=size):
+                plan['layers'].append(dict(piece, offset=g.get('offset',0)+done, **source_size))
         for c in p['captions']:
             if c.get('hidden'): continue
             sprite = preview.text_layer(c,'captions',(width,height),self.folder)

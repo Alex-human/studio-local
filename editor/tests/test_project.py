@@ -74,6 +74,12 @@ class ProjectTests(unittest.TestCase):
             editor.dispatch(dict(action='redo',project=str(path)))
             self.assertEqual(project.load(path)['mixer']['music'],-9)
 
+    def test_missing_project_is_rejected_without_creating_its_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'ausente'/'Proyecto.studio'
+            with self.assertRaises(ValueError):editor.dispatch(dict(action='open',project=str(path)))
+            self.assertFalse(path.parent.exists())
+
     def test_mcp_real_process(self):
         messages=[{'jsonrpc':'2.0','id':1,'method':'initialize','params':{}},{'jsonrpc':'2.0','id':2,'method':'tools/list'}]
         r=subprocess.run([sys.executable,str(Path(editor.__file__)),'--mcp'],input='\n'.join(map(json.dumps,messages))+'\n',capture_output=True,text=True,check=True)

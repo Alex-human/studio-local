@@ -32,14 +32,14 @@ EXPORTS = Path.home()/'Movies'/'Studio Local'
 
 @contextmanager
 def lock(path):
-    path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
-    with path.with_suffix('.lock').open('a') as f:
+    with Path(path).with_suffix('.lock').open('a') as f:
         fcntl.flock(f,fcntl.LOCK_EX)
         yield
 
 def project_path(req):
     path=Path(req.get('project','')).expanduser().resolve()
     if path.suffix!='.studio': raise ValueError('Selecciona un proyecto .studio')
+    if not path.is_file(): raise ValueError(f'No existe el proyecto {path}')
     return path
 
 def summary(path, p):
@@ -204,7 +204,7 @@ def dispatch(req):
     if action=='preparePlayback':
         frame=req.get('frame',0);project.number(frame,0,100_000_000,'fotograma de reproducción')
         if int(frame)!=frame:raise ValueError('El fotograma debe ser entero')
-        return preview.prepare(snapshot,path.parent,bool(req.get('nativeImages')),bool(req.get('nativeText')),bool(req.get('nativeMotion')),bool(req.get('nativeVideo')),bool(req.get('interactive')),int(frame),bool(req.get('lookAhead')),bool(req.get('forceRaster')),bool(req.get('nativeLut')))
+        return preview.prepare(snapshot,path.parent,bool(req.get('nativeImages')),bool(req.get('nativeText')),bool(req.get('nativeMotion')),bool(req.get('nativeVideo')),bool(req.get('interactive')),int(frame),bool(req.get('lookAhead')),bool(req.get('forceRaster')),bool(req.get('nativeLut')),bool(req.get('nativeRetime')))
     if action=='render':
         # Renders are immutable snapshots; later edits cannot change a running export.
         span=req.get('range')

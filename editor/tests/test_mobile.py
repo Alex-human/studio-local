@@ -80,6 +80,12 @@ class Mobile(unittest.TestCase):
         self.assertEqual(len(p['graphics']),1)
         self.assertEqual(p['graphics'][0]['props']['text'],'Nuevo gancho')
         self.assertEqual(self.source.read_bytes(),before)
+        self.assertTrue(self.edit({'type':'delete','kind':'clips','id':p['clips'][1]['id']})['ok'])
+        p = mobile.project.load(self.path)
+        self.assertEqual([c['length'] for c in p['clips']],[120])
+        self.assertEqual(p['graphics'][0]['length'],120)
+        self.assertEqual(p['audio'],self.original['audio'])
+        self.assertTrue(self.app.query(self.req(action='undo'))['ok'])
         self.assertTrue(self.app.query(self.req(action='undo'))['ok'])
         self.assertEqual(len(mobile.project.load(self.path)['clips']),1)
 
@@ -246,6 +252,10 @@ class Mobile(unittest.TestCase):
             self.assertEqual(request('GET','/icon.png')[0],200)
             self.assertEqual(request('GET',Host='attacker.example')[0],403)
             self.assertEqual(request('GET',Origin='https://evil.example')[0],403)
+            fuera={'Sec-Fetch-Site':'cross-site','Sec-Fetch-Dest':'document'}
+            self.assertEqual(request('GET',**fuera)[0],200)
+            self.assertEqual(request('GET',**{**fuera,'Sec-Fetch-Dest':'iframe'})[0],403)
+            self.assertEqual(request('GET','/icon.png',**fuera)[0],403)
             self.assertEqual(request('POST','/api','{}')[0],403)
             self.assertEqual(request('GET','/../engine/editor.py')[0],404)
             headers={'Origin':server.origin,'Content-Type':'application/json','X-Studio-Mobile':'1'}
@@ -254,6 +264,10 @@ class Mobile(unittest.TestCase):
             with patch.object(server.companion, 'warm', return_value={'queued':True}):
                 r=request('POST','/api',json.dumps({'action':'warm','project':self.pid,'revision':0,'frame':0}),**headers)
                 self.assertEqual(json.loads(r[2]), {'ok':True,'result':{'queued':True}})
+            plan={'action':'directPlan','project':self.pid,'revision':0}
+            r=request('POST','/api',json.dumps(plan),**headers)
+            self.assertEqual(r[0],409);self.assertIn('recarga',json.loads(r[2])['error'],'a page loaded before the player changed is told to reload')
+            self.assertTrue(json.loads(request('POST','/api',json.dumps({**plan,'player':mobile.PLAYER}),**headers)[2])['ok'])
             with patch.object(server.companion,'segment',return_value=(b'0123456789','video/mp4')):
                 r=request('GET',f'/media/{self.pid}/0/0.mp4',Range='bytes=2-5')
                 self.assertEqual((r[0],r[2]),(206,b'2345'))
@@ -287,13 +301,13 @@ class Mobile(unittest.TestCase):
         p['assets'][0]['duration']=1800
         plan=self.app.direct.plan(p)
         voice=[a for a in plan['audio'] if a['role']=='voice']
-        self.assertEqual([round(a['length']) for a in voice],[5,30,25])
-        self.assertEqual([a['source'] for a in voice],[25,0,0])
-        self.assertEqual([a['fadeOffset'] for a in voice],[0,5,35])
+        self.assertEqual([round(a['length']) for a in voice],[5,10,10,10,10,10,5])
+        self.assertEqual([a['source'] for a in voice],[5,0,0,0,0,0,0])
+        self.assertEqual([a['fadeOffset'] for a in voice],[0,5,15,25,35,45,55])
         self.assertTrue(all(a['fadeLength']==60 for a in voice))
-        self.assertEqual([a['deClickOffset'] for a in voice],[0,5,35])
+        self.assertEqual([a['deClickOffset'] for a in voice],[0,5,15,25,35,45,55])
         self.assertTrue(all(a['deClickLength']==60 for a in voice))
-        self.assertEqual([a['start'] for a in voice],[0,5,35])
+        self.assertEqual([a['start'] for a in voice],[0,5,15,25,35,45,55])
 
     def test_video_plan_splits_clips_at_source_chunks_and_keeps_their_phase(self):
         p=copy.deepcopy(self.original)
@@ -323,16 +337,55 @@ class Mobile(unittest.TestCase):
         layers=self.app.direct.plan(p)['layers']
         self.assertEqual([(g['start'],g['length'],g['offset']) for g in layers],[(100,200,7)])
 
+    def test_desktop_plan_keeps_timing_and_audio_but_separates_hd_visuals(self):
+        p=copy.deepcopy(self.original)
+        p.update(width=1920,height=1080)
+        p['assets'][0].update(width=1920,height=1080)
+        p['graphics'].append(dict(id='over',type='video',asset='asset',start=0,length=60,props={},**{'in':0}))
+        mobile.project.save(self.path,p)
+        sd=self.app.query(self.req(action='directPlan'))
+        hd=self.app.query(self.req(action='directPlan',size=1920))
+        sharp=self.app.query(self.req(action='directPlan',size=1280))
+        self.assertEqual((sd['width'],sd['height']),(640,360))
+        self.assertEqual((sharp['width'],sharp['height']),(1280,720))
+        self.assertEqual(sd['audio'],sharp['audio']);self.assertFalse({x['url'] for x in sharp['clips']}&{x['url'] for x in sd['clips']+hd['clips']})
+        self.assertEqual((hd['width'],hd['height']),(1920,1080))
+        self.assertEqual(sd['audio'],hd['audio'],'HD reuses exactly the same sound')
+        for a,b in zip(sd['clips']+sd['layers'],hd['clips']+hd['layers']):
+            self.assertNotEqual(a['url'],b['url'])
+            for key in ('start','length','in','motionOffset','motionLength'):
+                self.assertEqual(a.get(key),b.get(key))
+        self.assertEqual(sd,self.app.query(self.req(action='directPlan',size=640)))
+        self.assertEqual(mobile.project.load(self.path),p,'preview quality never edits the project')
+        for invalid in (4096,True,'1920',None):
+            with self.assertRaises(ValueError):self.app.query(self.req(action='directPlan',size=invalid))
+
+    def test_hd_proxy_encodes_real_1080p_without_upscaling_small_sources(self):
+        source=self.work/'hd.mp4'
+        mobile.render.run(['-v','error','-f','lavfi','-i','testsrc2=size=1920x1080:rate=30:duration=1',
+                          '-c:v','h264_videotoolbox','-b:v','8M','-pix_fmt','yuv420p',source])
+        d=self.app.direct
+        for asset,expected in ((dict(self.original['assets'][0],path=str(source),width=1920,height=1080),(1920,1080)),
+                               (self.original['assets'][0],(160,90))):
+            url=d.resource(asset,size=1920);name=url.rsplit('/',1)[1]
+            d.build(name,d.jobs[name]);result=mobile.render.probe(d.folder/name)
+            self.assertEqual((result['width'],result['height']),expected)
+            self.assertFalse(result['audio'])
+
     def test_direct_proxy_build_is_playable_and_small(self):
         d=self.app.direct
         url=d.resource(self.original['assets'][0]);name=url.rsplit('/',1)[1]
         d.build(name,d.jobs[name])
         asset=mobile.render.probe(d.folder/name)
         self.assertLessEqual(max(asset['width'],asset['height']),640)
+        data=(d.folder/name).read_bytes()
+        self.assertLess(data.index(b'moov'),data.index(b'mdat'),'the index arrives before the samples')
+        self.assertNotIn(b'ctts',data,'samples are in the order they are shown: the player feeds them as they come')
         self.assertFalse(asset['audio'])
         self.assertAlmostEqual(asset['duration'],10,places=1)
         url=d.resource(self.original['assets'][0],audio=True);name=url.rsplit('/',1)[1]
-        d.build(name,d.jobs[name]);self.assertLessEqual(mobile.render.probe(d.folder/name)['duration'],30.1)
+        d.build(name,d.jobs[name]);self.assertLessEqual(mobile.render.probe(d.folder/name)['duration'],10.1)
+        self.assertEqual((d.folder/name).read_bytes()[4:12],b'ftypisom','WebKit decodes plain MP4 sound, not the M4A brand')
 
     def test_chunk_proxy_shows_the_source_at_its_own_position(self):
         source=self.work/'long.mp4'
@@ -372,7 +425,7 @@ class Mobile(unittest.TestCase):
         d=self.app.direct;now=time.time()
         for n,age in enumerate((4000,3000,60,30,10)):
             path=d.folder/f'{n:032x}.mp4'
-            with path.open('wb') as file:file.truncate(900*1024**2)  # Sparse: no disk is written.
+            with path.open('wb') as file:file.truncate(2700*1024**2)  # Sparse: no disk is written.
             os.utime(path,(now-age,now-age))
         d.prune()
         self.assertEqual(sorted(p.name[31] for p in d.folder.glob('*.mp4')),['2','3','4'])
@@ -381,11 +434,17 @@ class Mobile(unittest.TestCase):
         d=self.app.direct
         self.app.prepare(list(self.app.catalog().values()))
         self.assertEqual(sorted(n[-3:] for n in d.queues[2]),['m4a','mp4'])
+        self.assertEqual(d.jobs[next(n for n in d.queues[2] if n.endswith('mp4'))]['size'],1280,'the library is ready in the picture a phone asks for first')
+        with patch.object(d,'plan',side_effect=AssertionError('an unchanged montage is not planned again')):
+            self.app.prepare(list(self.app.catalog().values()))
+        with patch.object(mobile.time,'sleep',side_effect=[None,SystemExit]), patch.object(self.app,'prepare') as prepare:
+            self.assertRaises(SystemExit,self.app.watch)
+        self.assertEqual(prepare.call_count,1,'the Mac prepares a changed library on its own, once')
         p=mobile.project.load(self.path)
         p['assets'][0]['duration']=2000;p['clips'][0]['length']=30000;p['graphics']=[]
         mobile.project.save(self.path,p)
         self.app.prepare(list(self.app.catalog().values()))
-        self.assertEqual(sorted(n[-3:] for n in d.queues[2]),['m4a']*3+['mp4']*7)
+        self.assertEqual(sorted(n[-3:] for n in d.queues[2]),['m4a']*7+['mp4']*7)
         d.queue(1,d.queues[2])
         with patch.object(self.app,'prepare'):
             self.app.query({'action':'library'})
@@ -394,6 +453,27 @@ class Mobile(unittest.TestCase):
         mobile.project.save(self.path,p);self.source.with_name('gone.mp4').unlink()
         self.app.prepare(list(self.app.catalog().values()))
         self.assertEqual(d.queues[2],[],'a montage without its source does not break the library')
+
+    def test_service_leaves_when_its_executable_or_code_is_replaced_but_never_during_a_write(self):
+        def sleep(_):
+            if slept.call_count==2:self.app.active.add('writing')
+            if slept.call_count==3:self.app.active.clear()
+        with patch.object(mobile,'running',side_effect=['a','a',None,'b','b']), patch.object(mobile.os,'_exit',side_effect=SystemExit) as leave, \
+             patch.object(mobile.time,'sleep',side_effect=sleep) as slept, patch.object(self.app,'prepare'):
+            self.assertRaises(SystemExit,self.app.watch)
+        leave.assert_called_once_with(0)
+        self.assertEqual(slept.call_count,3,'the same file, one being replaced and a write under way are no reason to leave')
+        engine=self.work/'editor'/'engine';engine.mkdir(parents=True);(engine/'project.py').write_text('')
+        with patch.object(mobile,'ROOT',engine.with_name('mobile')):
+            loaded=mobile.running()
+            self.assertEqual(mobile.running(),loaded)
+            os.utime(engine/'project.py',ns=(1,1))
+            self.assertNotEqual(mobile.running(),loaded,'an engine changed on the Mac is not the one this service loaded')
+
+    def test_phone_reports_are_appended_and_bounded(self):
+        self.app.query({'action':'clientLog','entries':[{'event':'played','ms':120},'x',{'event':'error','message':'m'*5000}]})
+        lines=(self.work/'runtime'/'client.log').read_text().splitlines()
+        self.assertEqual((len(lines),json.loads(lines[0])['ms']),(2,120));self.assertLessEqual(len(lines[1]),2000)
 
     def test_unreadable_source_does_not_block_the_queue(self):
         from subprocess import TimeoutExpired

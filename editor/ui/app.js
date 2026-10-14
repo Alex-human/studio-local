@@ -96,11 +96,12 @@ function drawInspector(){
   input(item.type==='channel_intro'?'Título de tarjeta':'Texto',props[item.type==='channel_intro'?'title':'text']||'',{type:'text',stacked:true,area:true},v=>prop(item.type==='channel_intro'?'title':'text',v));
   if(item.type==='title')check('Gancho editorial de Instagram',props.style==='instagram',v=>prop('style',v?'instagram':'plain'));
   if(item.type==='title'&&props.style==='instagram')check('Caja negra detrás del gancho',props.box,v=>prop('box',v));
+  if(item.type==='title')check('Sticker de Instagram · tarjeta negra por línea',props.style==='sticker',v=>prop('style',v?'sticker':'plain'));
   if(item.type==='title'&&!Object.keys(item.keyframes||{}).length){
    check('Mantener de una pieza al cortar',item.keepTogether,v=>set({keepTogether:v}));
    box.append(elem('p','muted tiny','Reúne sus fragmentos al cortar el vídeo siempre que la animación se conserve. Dividir este elemento directamente desactiva la opción.'));
   }
-  if(['title','lower_third'].includes(item.type)&&props.style!=='instagram')input('Texto secundario',props.subtitle||'',{type:'text',stacked:true},v=>prop('subtitle',v));
+  if(['title','lower_third'].includes(item.type)&&!['instagram','sticker'].includes(props.style))input('Texto secundario',props.subtitle||'',{type:'text',stacked:true},v=>prop('subtitle',v));
   input('Color de acento',props.accent||'#75b8ff',{type:'color'},v=>prop('accent',v));
   if(item.type==='title'){input('Tamaño',props.size||72,{min:20,max:200,step:1},v=>prop('size',v));input('Color de texto',props.color||'#ffffff',{type:'color'},v=>prop('color',v));}
   if(item.type!=='channel_intro'){const a=graphicAnchor(item);box.append(elem('p','muted tiny','Arrastra el gráfico en el visor para moverlo.'));input('Posición X',a.x,{min:0,max:1920},v=>prop('x',v));input('Posición Y',a.y,{min:0,max:Math.min(3840,Math.round(1920*p.height/p.width))},v=>prop('y',v));}

@@ -25,7 +25,9 @@ import AVFoundation
             precondition(instructions.flatMap { $0.spans }.contains { !$0.transform.isIdentity },"Orientation fixture has no rotation metadata")
         }
         let reader=try AVAssetReader(asset:timeline.item.asset)
-        let output=AVAssetReaderVideoCompositionOutput(videoTracks:timeline.item.asset.tracks(withMediaType:.video),videoSettings:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA])
+        let output=AVAssetReaderVideoCompositionOutput(videoTracks:timeline.item.asset.tracks(withMediaType:.video),videoSettings:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA,
+            // Read the frames as the screen shows them: AVFoundation converts the BT.709 output to sRGB.
+            AVVideoColorPropertiesKey:[AVVideoColorPrimariesKey:AVVideoColorPrimaries_ITU_R_709_2,AVVideoTransferFunctionKey:AVVideoTransferFunction_IEC_sRGB,AVVideoYCbCrMatrixKey:AVVideoYCbCrMatrix_ITU_R_709_2]])
         output.videoComposition=timeline.item.videoComposition;reader.add(output)
         let requested=Set(plan["testFrames"] as! [Int]);var seen=Set<Int>()
         precondition(reader.startReading(),"Reader did not start: \(String(describing:reader.error))")

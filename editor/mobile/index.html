@@ -13,8 +13,8 @@
   <input id="scrub" type="range" min="0" max="1" step="1" value="0" aria-label="Posición en el vídeo">
   <div class="timeline-head"><span>MONTAJE</span><div><button id="zoomOut" class="icon" aria-label="Alejar línea de tiempo">−</button><button id="zoomIn" class="icon" aria-label="Ampliar línea de tiempo">＋</button></div></div>
   <div id="timeline" aria-label="Capas del montaje"><div id="tracks"></div></div>
-  <div id="selection"><span id="selectedLabel">Bordes ajusta el clip actual · Texto muestra los textos</span><button id="itemLink" hidden></button></div>
-  <div id="editbar"><button id="split">✂ Dividir</button><button id="edges">↔ Bordes</button><button id="hook">Aa Texto</button></div>
+  <div id="selection"><span id="selectedLabel">Bordes ajusta el clip actual · Texto muestra los textos</span><button id="rewrite" class="primary" hidden>✎ Reescribir</button><button id="itemLink" hidden></button></div>
+  <div id="editbar"><button id="split">✂ Dividir</button><button id="edges">↔ Bordes</button><button id="hook">Aa Texto</button><button id="remove">✕ Eliminar</button></div>
   <div id="tabs" role="tablist" aria-label="Panel del editor"><button id="notesTab" role="tab" aria-selected="true">Comentarios <span id="noteCount"></span></button><button id="layersTab" role="tab" aria-selected="false">Sincronizar capas</button></div>
   <section id="notesPanel"><div id="notes"></div></section>
   <section id="layersPanel" hidden><p class="hint">Las capas unidas siguen los cortes del vídeo. Las libres conservan su posición.</p><button id="linkAll">Unir todas</button><div id="layerControls"></div></section>

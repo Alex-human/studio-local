@@ -2,15 +2,18 @@
 """Loopback companion for Studio. Remote access is exclusively through an approved Serve proxy."""
 import argparse
 import copy
+import gzip
 import hashlib
 import json
 import math
 import mimetypes
+import os
 import re
 import sqlite3
 import sys
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -25,7 +28,19 @@ import render
 import sync
 from direct import DirectMedia, spans
 
+PLAYER = 2  # The page's player these plans and media are for; a page loaded before it changed is told to reload.
+
 ID = re.compile(r'^[A-Za-z0-9_-]{1,80}$')
+
+
+def running():
+    """What tells the executable and the code this process loaded apart from others; None while one is being replaced."""
+    try:
+        found = os.stat(sys.executable)
+        return found.st_ino, found.st_mtime_ns, *((f.name, f.stat().st_mtime_ns)
+                                                  for folder in (ROOT, ROOT.parent/'engine') for f in sorted(folder.glob('*.py')))
+    except OSError:
+        return None
 
 
 def identifier(value):
@@ -65,6 +80,7 @@ class Companion:
         self.warm_jobs = []
         self.warming = False
         self.active = set()
+        self.planned = {}
         with self.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, digest TEXT, result TEXT)')
 
@@ -102,6 +118,17 @@ class Companion:
         return {'project': public_project(p) if p['revision'] != revision else None,
                 'revision': p['revision'], 'notes': [public_note(n) for n in notes['notes']]}
 
+    def client_log(self, entries):
+        """What the phone's player measured: timings and failures, bounded, never content."""
+        if not isinstance(entries, list):
+            raise ValueError('Registro no válido')
+        log = self.runtime/'client.log'
+        if log.exists() and log.stat().st_size > 2_000_000:
+            log.replace(self.runtime/'client.log.1')
+        stamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        with log.open('a') as file:
+            file.write(''.join(json.dumps({'t': stamp, **entry}, ensure_ascii=False)[:2000]+'\n' for entry in entries if isinstance(entry, dict)))
+
     def query(self, req):
         action = req.get('action')
         if action == 'library':
@@ -118,7 +145,7 @@ class Companion:
             return self.warm(req['project'], req['revision'], req['frame'])
         if action == 'directPlan':
             _, p = self.read(req['project'], integer(req['revision']))
-            plan = self.direct.plan(p)
+            plan = self.direct.plan(p, req.get('size', 640))
             if plan:
                 at = integer(req.get('frame', 0))/p['fps']
                 # From the playhead onwards, then what lies behind it.
@@ -127,6 +154,8 @@ class Companion:
             return plan
         if action == 'directStatus':
             return self.direct.status(req['urls'])
+        if action == 'clientLog':
+            return self.client_log(req['entries'])
         if action == 'receipt':
             with self.db() as db:
                 row = db.execute('SELECT result FROM requests WHERE id=?', (identifier(req['requestId']),)).fetchone()
@@ -137,14 +166,34 @@ class Companion:
     def prepare(self, catalog):
         """Short montages are ready before they are opened; long ones, their first minute. Newest first."""
         urls = []
-        for _, p in sorted(catalog, key=lambda item: item[0].stat().st_mtime, reverse=True):
+        for path, p in sorted(catalog, key=lambda item: item[0].stat().st_mtime, reverse=True):
+            stamp = path.stat().st_mtime_ns
+            if self.planned.get(path, (0,))[0] != stamp:  # Only a montage that changed is planned again.
+                try:
+                    plan = self.direct.plan(p, 1280)  # What a phone asks for first.
+                except (OSError, KeyError, ValueError):
+                    plan = None  # A montage with an unreadable source still lists; opening it reports the problem.
+                self.planned[path] = (stamp, [url for start, _, url in sorted(spans(plan)) if plan['frames'] <= 900*plan['fps'] or start < 60] if plan else [])
+            urls += self.planned[path][1]
+        self.direct.queue(2, urls, 2400)
+
+    def watch(self):
+        """A montage created or changed on the Mac is prepared before the phone asks for it."""
+        seen, started = None, running()
+        while True:
             try:
-                plan = self.direct.plan(p)
+                stamp = [(path, path.stat().st_mtime_ns) for path in project_library.project_files(self.projects)]
+                if stamp != seen:
+                    self.prepare(list(self.catalog().values()))
+                    seen = stamp
             except (OSError, KeyError, ValueError):
-                continue  # A montage with an unreadable source still lists; opening it reports the problem.
-            if plan:
-                urls += [url for start, _, url in sorted(spans(plan)) if plan['frames'] <= 900*plan['fps'] or start < 60]
-        self.direct.queue(2, urls, 1200)
+                pass
+            # macOS stops letting a process read Documents once the file it runs from is replaced, as a Codex update
+            # does, and an engine changed on the Mac writes montages the one loaded here rejects, which fails the
+            # whole library: leaving lets launchd start the service again from the new ones. Never in the middle of a write.
+            if running() not in (None, started) and not self.active:
+                os._exit(0)
+            time.sleep(20)
 
     def mutate(self, req):
         rid = identifier(req.get('requestId'))
@@ -245,6 +294,8 @@ class Companion:
                     operation.update(op='resizeEdge', edge=op.get('edge'), delta=integer(op.get('delta'), -100_000_000))
                 elif mode == 'split':
                     operation.update(op='split', at=integer(op.get('at'), 1))
+                elif mode == 'delete':
+                    operation.update(op='delete')
                 else:
                     raise ValueError('Operación no disponible en móvil')
             result = editor.dispatch(dict(base, action='ops', ops=[operation]))
@@ -393,7 +444,8 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if server.user and self.headers.get('Tailscale-User-Login', '').casefold() != server.user.casefold():
             return False
-        if self.headers.get('Sec-Fetch-Site') == 'cross-site':
+        if self.headers.get('Sec-Fetch-Site') == 'cross-site' and not (   # la página sí se abre desde fuera: icono de inicio o enlace
+                self.command == 'GET' and urlsplit(self.path).path == '/' and self.headers.get('Sec-Fetch-Dest') == 'document'):
             return False
         origin = self.headers.get('Origin')
         if origin and origin != server.origin:
@@ -402,6 +454,8 @@ class Handler(BaseHTTPRequestHandler):
                              and self.headers.get('Content-Type', '').split(';')[0] == 'application/json')
 
     def send(self, data, content_type, status=200, headers=None):
+        if len(data) > 1024 and content_type.startswith(('application/json', 'text/')) and 'gzip' in self.headers.get('Accept-Encoding', ''):
+            data, headers = gzip.compress(data, 5), {**(headers or {}), 'Content-Encoding': 'gzip'}
         self.send_response(status)
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(data)))
@@ -430,6 +484,8 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(length))
             if not isinstance(req, dict):
                 raise ValueError('Petición no válida')
+            if req.get('action') == 'directPlan' and req.get('player') != PLAYER:
+                return self.error(409, 'Studio móvil se ha actualizado: recarga la página.')
             result = self.server.companion.query(req)
             if req.get('action') in ('library', 'state', 'receipt', 'warm', 'directPlan', 'directStatus'):
                 result = {'ok': True, 'result': result}
@@ -534,6 +590,7 @@ def serve(projects, runtime, port=8766, origin=None, user=None):
     server.origin = origin or f'http://127.0.0.1:{server.server_port}'
     server.user = user
     server.companion = Companion(projects, runtime)
+    threading.Thread(target=server.companion.watch, daemon=True).start()
     return server
 
 

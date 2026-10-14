@@ -6,11 +6,11 @@ let library, folder = '', p = null, frame = 0, selection = null, notes = [], bus
 let scale = 16, playing = false, playbackOffset = 0, mediaGeneration = 0, noteDraft = null, textDraft = null;
 let pollBusy = false, drawing = false, stroke = null, navigation = 0, dragging = false;
 let mediaSource = null, speed = 1, warmTimer = null, positioning = false;
-let directSupported=null, directLoad=null, directRequest=0, timelineHold=0, timelineTouch=false;
+let directSupported=null, directLoad=null, directRequest=0, timelineHold=0, timelineTouch=false, timelineTap=null;
 const direct=new DirectPlayer($('viewer'),query,n=>{frame=n;updatePosition();},(active,loading)=>{
   playing=active;$('play').textContent=active?'Ⅱ':'▶';$('play').setAttribute('aria-label',active?'Pausar':'Reproducir');
   $('preparing').textContent='Cargando medios…';$('preparing').hidden=!loading;
-},e=>notice(e.message));
+},e=>{notice(e.message);if(direct.broken&&directSupported){directSupported=false;showFrame();}},report);
 const pendingKey = 'studio-mobile-pending';
 const draftKey = pid => 'studio-mobile-note-' + pid;
 const textKey = draft => 'studio-mobile-text-' + draft.project + '-' + draft.id;
@@ -35,6 +35,19 @@ async function api(req) {
   if (!response.ok) throw new Error(data.error || 'No se pudo conectar con el Mac.');
   return data;
 }
+// What the player measured on this phone, for the Mac's log: timings and failures, never content.
+const reports=[];let reportTimer=null;
+function report(event,data) {
+  reports.push({event,project:p?.id,...data});
+  reportTimer??=setTimeout(flushReports,2000);
+}
+function flushReports() {
+  clearTimeout(reportTimer);reportTimer=null;if(!reports.length)return;
+  fetch('/api',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Studio-Mobile':'1'},body:JSON.stringify({action:'clientLog',entries:reports.splice(0)})}).catch(()=>{});
+}
+report('hello',{agent:navigator.userAgent,decoder:typeof VideoDecoder});
+window.addEventListener('error',e=>report('error',{where:'page',message:String(e.message)}));
+window.addEventListener('unhandledrejection',e=>report('error',{where:'promise',message:String(e.reason?.message||e.reason)}));
 async function query(req) {
   const data = await api(req);
   if (!data.ok) throw new Error(data.error);
@@ -43,10 +56,11 @@ async function query(req) {
 function task(fn) { return (...args) => Promise.resolve().then(() => fn(...args)).catch(e => { notice(e.message); status('Revisa el aviso'); }); }
 function controls() {
   const locked = busy || !!stored(pendingKey);
-  for (const id of ['back','undo','redo','split','edges','hook','itemLink','linkAll','saveNote','saveText','shorten','extend']) $(id).disabled = locked;
+  for (const id of ['back','undo','redo','split','edges','hook','remove','rewrite','itemLink','linkAll','saveNote','saveText','shorten','extend']) $(id).disabled = locked;
   for (const node of document.querySelectorAll('#layerControls button, dialog textarea, dialog input, dialog select, dialog .close')) node.disabled=locked;
   for(const id of ['drawToggle','drawUndo','discardDraft','loadSavedText']) $(id).disabled=locked;
   $('edges').disabled ||= !total();
+  $('remove').disabled ||= !selected();
   $('itemLink').disabled ||= selection?.kind === 'clips';
   $('hook').disabled ||= !p || !items().some(editable);
   $('play').disabled = locked || !total();
@@ -152,7 +166,8 @@ function anchor() {
 function applyProject(next) {
   const ref = p?.id === next.id ? anchor() : null;
   const changed=p?.id !== next.id || p?.revision !== next.revision;
-  if(changed) releaseMedia();
+  // An edit keeps the videos of the montage: most of them are the same after it.
+  if(changed) releaseMedia(p?.id===next.id);
   p = next;
   if (ref) {
     let start = 0; const matches = [];
@@ -174,7 +189,7 @@ function loadDirect() {
     directLoad=null;
     if(supported===undefined)return;
     directSupported=supported;
-    if(!supported)notice('Este proyecto usa un efecto que requiere previsualización compuesta.');
+    if(!supported)notice('Este montaje se ve con la previsualización compuesta.');
     showFrame();
   }).catch(e=>{if(request!==directRequest||p?.id!==id||p.revision!==revision)return;directLoad=null;notice(e.message);$('preparing').hidden=true;});
 }
@@ -222,8 +237,8 @@ function mediaCovers() {
   return !!p && !!mediaSource && mediaSource.project === p.id && mediaSource.revision === p.revision && frame >= playbackOffset &&
     frame < (mediaSource.hls ? total() : playbackOffset+Math.round(p.fps*6));
 }
-function releaseMedia() {
-  direct.release();
+function releaseMedia(keepDirect=false) {
+  if(!keepDirect)direct.release();
   clearTimeout(warmTimer); mediaGeneration++; mediaSource=null; positioning=false;
   video.pause(); video.removeAttribute('src'); video.load();
 }
@@ -287,9 +302,27 @@ $('next').onclick = () => seek(frame+1);
 function seek(next) { pause(); frame = Math.max(0,Math.min(Math.round(next),total()-1)); showFrame(); }
 $('scrub').oninput = () => { const next=Number($('scrub').value); if (playing) pause(); frame=next; updatePosition(); };
 $('scrub').onchange = showFrame;
-$('timeline').addEventListener('pointerdown',()=>{timelineTouch=true;});
+$('timeline').addEventListener('pointerdown',event=>{
+  timelineTouch=true;
+  timelineTap=event.isPrimary && event.button===0 ? {x:event.clientX,y:event.clientY} : null;
+});
+$('timeline').addEventListener('pointermove',event=>{
+  if(timelineTap && Math.hypot(event.clientX-timelineTap.x,event.clientY-timelineTap.y)>8)timelineTap=null;
+});
+$('timeline').addEventListener('pointercancel',()=>{timelineTap=null;});
 for(const event of ['pointerup','pointercancel'])window.addEventListener(event,()=>{if(timelineTouch){timelineTouch=false;timelineHold=performance.now()+1500;}});
 $('timeline').addEventListener('wheel',()=>{timelineHold=performance.now()+1500;},{passive:true});
+$('tracks').onclick=tapTimeline;
+function tapTimeline(event,row) {
+  event.stopPropagation();
+  if(busy || dragging || event.target.closest('.handle'))return;
+  if(!event.detail) { if(row)choose(row); return; }
+  if(!timelineTap)return;
+  timelineTap=null;
+  const next=(event.clientX-$('tracks').getBoundingClientRect().left)/scale*p.fps;
+  timelineHold=performance.now()+1500;
+  if(row)choose(row,next);else seek(next);
+}
 
 function items() {
   let start = 0;
@@ -303,7 +336,7 @@ function selected() { return p && selection ? items().find(x => x.kind === selec
 function linked(row) { return row.kind === 'clips' || (row.item.linked ?? p.syncTracks?.[row.track] ?? true); }
 function editable(item) { return !!item && (item.kind === 'captions' || item.kind === 'graphics' && item.item.type === 'title'); }
 function label(row) { return row.item.props?.text || row.item.text || p.assets.find(a => a.id === row.item.asset)?.name || names[row.track]; }
-function choose(row) { selection = {kind:row.kind,id:row.item.id}; seek(Math.max(row.start, Math.min(frame,row.start+row.item.length-1))); renderTimeline(); controls(); }
+function choose(row,next=frame) { selection = {kind:row.kind,id:row.item.id}; seek(Math.max(row.start, Math.min(next,row.start+row.item.length-1))); renderTimeline(); controls(); }
 function renderTimeline() {
   const tracks = $('tracks'); tracks.replaceChildren();
   tracks.style.width = `${Math.max($('timeline').clientWidth-32,total()/p.fps*scale)}px`;
@@ -322,36 +355,41 @@ function renderTimeline() {
       block.style.left = `${row.start/p.fps*scale}px`; block.style.width = `${Math.max(4,row.item.length/p.fps*scale)}px`;
       block.title = `${names[track]}: ${label(row)}`; block.setAttribute('aria-label',block.title);
       block.append(element('span','block-label',label(row)));
-      block.onclick = () => { if (!busy) choose(row); };
+      block.onclick = event => tapTimeline(event,row); block.row = row;
       if (sel) for (const edge of ['start','end']) {
         const handle = element('span',`handle ${edge}`,'Ⅱ'); handle.setAttribute('aria-label',edge === 'start' ? 'Ajustar inicio' : 'Ajustar final');
-        handle.onpointerdown = event => dragEdge(event,row,edge,handle,block); block.append(handle);
+        handle.onpointerdown = event => dragEdge(event,row,edge,block); block.append(handle);
       }
       lane.node.append(block);
     }
   }
   tracks.append(element('div','playhead')); updatePosition();
   const row = selected(); $('selectedLabel').textContent = row ? `${names[row.track]} · ${label(row)}` : 'Bordes ajusta el clip actual · Texto muestra los textos';
-  $('itemLink').hidden = !row || row.kind === 'clips';
+  $('itemLink').hidden = !row || row.kind === 'clips'; $('rewrite').hidden = !editable(row);
   if (row) $('itemLink').textContent = linked(row) ? '🔗 Unida' : 'Libre';
 }
-function dragEdge(event,row,edge,handle,block) {
-  event.preventDefault(); event.stopPropagation(); if (busy || stored(pendingKey)) return;
-  pause(); const x = event.clientX, revision = p.revision, id = p.id; let delta = 0;
+function dragEdge(event,row,edge,block) {
+  event.preventDefault(); event.stopPropagation(); if (busy || dragging || stored(pendingKey)) return;
+  pause(); const x = event.clientX, pointer = event.pointerId, revision = p.revision, id = p.id; let delta = 0;
+  // Shortening a video clip closes the gap: what comes after it follows the edge while dragging, as it will once saved.
+  const after = row.kind === 'clips' ? [...$('tracks').querySelectorAll('.block')].filter(b => linked(b.row) && b.row.start >= row.start+row.item.length) : [];
   dragging=true;
-  handle.setPointerCapture(event.pointerId);
-  handle.onpointermove = move => {
-    delta = Math.round((move.clientX-x)/scale*p.fps);
+  const move = e => {
+    if (e.pointerId !== pointer) return;
+    delta = Math.round((e.clientX-x)/scale*p.fps);
     const length = row.item.length+(edge === 'end' ? delta : -delta);
-    if (length > 0) block.style.width = `${Math.max(4,length/p.fps*scale)}px`;
+    if (length > 0) { block.style.width = `${Math.max(4,length/p.fps*scale)}px`; for (const b of after) b.style.transform = `translateX(${(length-row.item.length)/p.fps*scale}px)`; }
     $('selectedLabel').textContent = `${edge === 'start'?'Inicio':'Final'}: ${delta>0?'+':''}${(delta/p.fps).toFixed(2)} s`;
   };
-  handle.onpointerup = task(async up => {
-    up.stopPropagation(); handle.onpointermove = null; dragging=false;
-    if (delta) await mutate({action:'edit',project:id,revision,op:{type:'resize',kind:row.kind,id:row.item.id,edge,delta}});
-    renderTimeline();
+  // The finger is followed on the window: the gesture ends wherever it is lifted, and the timeline always shows what was saved.
+  const end = task(async e => {
+    if (e.pointerId !== pointer) return;
+    for (const type of ['pointermove','pointerup','pointercancel']) window.removeEventListener(type,type === 'pointermove' ? move : end,true);
+    dragging=false; report('edge',{edge,delta,end:e.type});
+    try { if (e.type === 'pointerup' && delta) await mutate({action:'edit',project:id,revision,op:{type:'resize',kind:row.kind,id:row.item.id,edge,delta}}); }
+    finally { renderTimeline(); }
   });
-  handle.onpointercancel = () => { handle.onpointermove = null; dragging=false; renderTimeline(); };
+  window.addEventListener('pointermove',move,true); window.addEventListener('pointerup',end,true); window.addEventListener('pointercancel',end,true);
 }
 $('zoomIn').onclick = () => { scale = Math.min(256,scale*2); renderTimeline(); };
 $('zoomOut').onclick = () => { scale = Math.max(1,scale/2); renderTimeline(); };
@@ -362,6 +400,7 @@ $('split').onclick = task(async () => {
   await mutate({action:'edit',op});
 });
 $('itemLink').onclick = task(async () => { const row=selected(); if (row) await mutate({action:'edit',op:{type:'linked',kind:row.kind,id:row.item.id,linked:!linked(row)}}); });
+$('remove').onclick = task(async () => { const row=selected(); if (row) await mutate({action:'edit',op:{type:'delete',kind:row.kind,id:row.item.id}}); });
 $('edges').onclick = () => {
   pause();
   const row=selected() || items().find(x=>x.kind==='clips' && x.start<=frame && frame<x.start+x.item.length);
@@ -417,6 +456,9 @@ function renderTextChoices() {
   if (!rows.length) $('textChoices').append(element('p','hint','No hay textos que coincidan.'));
 }
 $('textSearch').oninput=renderTextChoices;
+$('rewrite').onclick = () => openText(selected());
+// A text is rewritten where it is seen: tapping it on the picture opens it.
+$('viewer').onclick = event => { if (directSupported && !$('hook').disabled) openText(items().find(row => row.item.id === direct.textAt(event))); };
 function saveTextDraft(){if(textDraft){textDraft.text=$('hookText').value;try{persist(textKey(textDraft),textDraft);}catch{notice('No se puede conservar el texto aquí. Guarda antes de cerrar.');}}}
 $('hookText').oninput=saveTextDraft;
 $('textDialog').addEventListener('close',saveTextDraft);
@@ -496,7 +538,7 @@ $('drawing').onpointerdown=event=>{
 $('drawing').onpointermove=event=>{if(stroke && stroke.points.length<2000){stroke.points.push(point(event));paint();}};
 for(const evt of ['pointerup','pointercancel']) $('drawing').addEventListener(evt,()=>{if(stroke){stroke=null;saveDraft();}});
 
-document.addEventListener('visibilitychange',()=>{if(document.hidden) {pause();releaseMedia();} else if(p && !modal()) {showFrame();task(reload)();}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden) {pause();releaseMedia();flushReports();} else if(p && !modal()) {showFrame();task(reload)();}});
 window.addEventListener('offline',()=>{pause(); status('Sin conexión · borradores conservados');});
 window.addEventListener('online',()=>{if(!stored(pendingKey)) task(p?reload:loadLibrary)();});
 setInterval(async()=>{

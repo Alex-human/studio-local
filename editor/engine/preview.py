@@ -101,13 +101,15 @@ def visual_key(p,native_images=False,native_text=False,motion=False,video=False)
     return digest(dict(version=CACHE_VERSION,fps=p['fps'],width=p['width'],height=p['height'],assets=asset_ids,
         **{kind:[clean(x,kind) for x in p[kind] if not x.get('hidden') and (kind=='clips' or not native_overlay(x,kind,native_images,native_text,motion,video))] for kind in ('clips','graphics','captions')}))
 
+def retimed(a,p):return abs(a.get('fps',0)-p['fps'])>=.01
+
 def direct(c,a,p,video=False):
     if p.get('_forcePreviewRender'):return False
     if video:
-        # The legacy base renderer has a different retiming phase. Keep those
-        # cuts canonical; newly introduced overlays use exact source timestamps.
+        # A file at another frame rate plays directly on hosts that sample it with the
+        # exporter's phase; speed changes and fractional entries stay canonical.
         return (Path(a['path']).suffix.lower() in ('.mp4','.mov','.m4v') and
-                abs(a.get('fps',0)-p['fps'])<.01 and c.get('speed',1)==1 and
+                (p.get('_nativeRetime') or not retimed(a,p)) and c.get('speed',1)==1 and
                 abs(c.get('in',0)-round(c.get('in',0)))<1e-7)
     color=c.get('color',{})
     return (Path(a['path']).suffix.lower() in ('.mp4','.mov','.m4v') and 'lut' not in a and
@@ -132,7 +134,7 @@ def regions(p,native_images=False,native_text=False,motion=False,video=False):
                 for start in range(first,last,chunk):result.append(dict(start=start,end=min(start+chunk,last),cached=True))
             else:
                 clip=project.slice_item(c,'clips',first-offset,last-offset)
-                result.append(dict(start=first,end=last,cached=False,path=a['path'],sourceIn=clip.get('in',0),clip=clip,lut=a.get('lut')))
+                result.append(dict(start=first,end=last,cached=False,path=a['path'],sourceIn=clip.get('in',0),clip=clip,lut=a.get('lut'),retime=retimed(a,p)))
         offset=end
     return result
 
@@ -277,13 +279,14 @@ def playback_interval(p,frame,motion,video,look_ahead=False):
     next_start=min((first for first,last in affected if first>frame),default=total)
     return frame,min(total,next_start)
 
-def prepare(p,folder,native_images=False,native_text=False,native_motion=False,native_video=False,interactive=False,frame=0,look_ahead=False,force_raster=False,native_lut=False):
+def prepare(p,folder,native_images=False,native_text=False,native_motion=False,native_video=False,interactive=False,frame=0,look_ahead=False,force_raster=False,native_lut=False,native_retime=False):
     tick=time.monotonic();project.validate(p,check_files=True)
     if not p['clips']:raise ValueError('Añade primero un vídeo.')
     # A host without the LUT would show log footage flat: those frames keep the exporter's painter.
     if not native_lut and any('lut' in a for a in p['assets']):native_video=False
     if force_raster:
         p=copy.deepcopy(p);p['_forcePreviewRender']=True;native_images=native_text=native_motion=native_video=False
+    if native_retime:p={**p,'_nativeRetime':True}
     original=p;total=project.duration(p);start,end=(playback_interval(p,frame,native_motion,native_video,look_ahead) if interactive else (0,total))
     if start or end<total:p=playback_window(p,start,end)
     native_images,native_text=native_modes(p,native_images,native_text,native_motion,native_video)
@@ -311,7 +314,7 @@ def prepare(p,folder,native_images=False,native_text=False,native_motion=False,n
             outputs.append(dict(path=str(dest),sourceIn=0,length=length,start=region['start']))
         else:
             clip=region['clip'];spec=dict(path=region['path'],sourceIn=region['sourceIn'],length=length,start=region['start'],**lut_spec(region))
-            if native_video:spec.update({key:clip[key] for key in ('speed','zoom','zoomEnd','x','y','color','motionOffset','motionLength') if key in clip})
+            if native_video:spec.update({key:clip[key] for key in ('speed','zoom','zoomEnd','x','y','color','motionOffset','motionLength') if key in clip},**({'retime':True} if region['retime'] else {}))
             outputs.append(spec)
     native_audio=(native_images or interactive) and not p.get('ducking',False)
     sources=audio_layers(p) if native_audio else []

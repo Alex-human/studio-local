@@ -120,7 +120,7 @@ def validate(p, check_files=False):
                 props=item.get('props',{})
                 if not isinstance(props,dict):raise ValueError('Parámetros gráficos no válidos')
                 if 'weight' in props:number(props['weight'],100,900,'Peso de texto')
-                if item['type']=='title' and props.get('style','plain') not in ('plain','instagram'):
+                if item['type']=='title' and props.get('style','plain') not in ('plain','instagram','sticker'):
                     raise ValueError('Estilo de título no válido')
                 if type(props.get('box',False)) is not bool:raise ValueError('Caja del gancho no válida')
                 limits={'x':(-1920,3840),'y':(-1080,3840),'size':(8,500),'opacity':(0,1),'enter':(.01,10),'width':(1,3840),'value':(-1e9,1e9),'count':(1,5),'rotation':(-180,180),'soundDb':(-60,6),'cropLeft':(0,.98),'cropRight':(0,.98),'cropTop':(0,.98),'cropBottom':(0,.98)}

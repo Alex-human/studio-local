@@ -26,10 +26,16 @@ Requisitos: un Mac con chip Apple (M1 o posterior), conexión a internet durante
 - CLI y servidor MCP para que Claude edite los mismos proyectos mientras tú miras.
 - Interfaz opcional para el iPhone.
 
+## Máquina de contenido: clips y YouTube Mids
+
+Para instalar las skills y configurar tu canal, abre [`contenido/Clips verticales y mids · instalador.md`](contenido/Clips%20verticales%20y%20mids%20%C2%B7%20instalador.md). Es un archivo único que el agente sigue: prepara herramientas, pregunta por audiencia y estilo, ofrece este editor y verifica una primera pieza. También funciona sin Studio.
+
+Descargar el ZIP de este repositorio incluye tanto ese instalador como el código del editor. Las dependencias se descargan durante la instalación; no es un paquete offline. El agente debe ejecutarse localmente con acceso al Mac. No incluye vídeos, proyectos ni cuentas del autor.
+
 ## Cambiarlo a tu gusto
 
 Abre Claude en la carpeta del repositorio y pídele el cambio. `CLAUDE.md` le dice dónde está cada parte y cómo comprobarla; el manual completo está en [`docs/MANUAL.md`](docs/MANUAL.md).
 
 ## Licencia
 
-MIT. Los archivos de terceros conservan su licencia: la tipografía Inter (OFL), SoundTouchJS (MPL-2.0) y el sonido de clic (CC0). FFmpeg se instala desde `imageio-ffmpeg` con su propia licencia. La LUT de DJI para D-Log M no se incluye; ver [`editor/assets/luts/README.md`](editor/assets/luts/README.md).
+MIT. Los archivos de terceros conservan su licencia: las tipografías Inter y Barlow (OFL), SoundTouchJS (MPL-2.0) y el sonido de clic (CC0). FFmpeg se instala desde `imageio-ffmpeg` con su propia licencia. La LUT de DJI para D-Log M no se incluye; ver [`editor/assets/luts/README.md`](editor/assets/luts/README.md).

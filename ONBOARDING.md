@@ -1,6 +1,6 @@
 # Onboarding de Studio Local
 
-Instrucciones para Claude. La persona que te las pasa quiere tener Studio Local funcionando en su Mac sin tocar la terminal. Hazlo tú, paso a paso, y explícale en lenguaje sencillo lo que vas haciendo. Pide permiso antes de cada comando que instale algo.
+Instrucciones para Claude Code, Codex u otro agente con acceso local al Mac. La persona que te las pasa quiere tener Studio Local funcionando en su Mac sin tocar la terminal. Hazlo tú, paso a paso, y explícale en lenguaje sencillo lo que vas haciendo. La petición de instalar autoriza los componentes aquí descritos; explica su propósito y respeta los permisos del entorno. Pregunta antes de instalar componentes opcionales no elegidos.
 
 ## 1. Comprobar el Mac
 

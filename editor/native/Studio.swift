@@ -251,7 +251,7 @@ final class Studio: NSObject, NSApplicationDelegate, NSWindowDelegate, WKScriptM
         var compatibleRequest = request
         if action == "preparePlayback" {
             compatibleRequest["nativeImages"] = true; compatibleRequest["nativeText"] = true
-            compatibleRequest["nativeMotion"] = true; compatibleRequest["nativeVideo"] = true; compatibleRequest["interactive"] = true; compatibleRequest["nativeLut"] = true
+            compatibleRequest["nativeMotion"] = true; compatibleRequest["nativeVideo"] = true; compatibleRequest["interactive"] = true; compatibleRequest["nativeLut"] = true; compatibleRequest["nativeRetime"] = true
         }
         guard let data = try? JSONSerialization.data(withJSONObject: compatibleRequest) else { respond(["ok": false, "error": "Operación no admitida"]); return }
         let process = Process(); process.executableURL = URL(fileURLWithPath: python)

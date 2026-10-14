@@ -31,6 +31,24 @@ class PlaybackDispatchTests(unittest.TestCase):
             self.assertEqual(plan['audioSources'][0]['path'], str(source))
             self.assertEqual(path.read_bytes(), before)
 
+    def test_file_at_another_frame_rate_plays_directly_only_on_a_host_that_retimes(self):
+        with tempfile.TemporaryDirectory(prefix='studio-dispatch-') as tmp:
+            root = Path(tmp)
+            source = root / 'source.mp4'
+            render.run(['-v', 'error', '-f', 'lavfi', '-i', 'color=size=64x64:rate=30:duration=1',
+                        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', source])
+            p = project.new(width=64, height=64, fps=50)
+            p['assets'] = [dict(id='video', path=str(source), name='Source', kind='video',
+                                duration=1, width=64, height=64, fps=30, audio=False)]
+            p['clips'] = [dict(id='clip', asset='video', length=40, **{'in': 5})]
+            path = root / 'Project.studio'
+            project.save(path, p)
+            request = dict(action='preparePlayback', project=str(path), nativeImages=True, nativeText=True,
+                           nativeMotion=True, nativeVideo=True, interactive=True, frame=0)
+            plan = editor.dispatch(dict(request, nativeRetime=True))
+            self.assertEqual((plan['directFrames'], plan['progressive'], plan['clips'][0].get('retime')), (40, False, True))
+            self.assertTrue(editor.dispatch(request)['progressive'])
+
 
 if __name__ == '__main__':
     unittest.main()

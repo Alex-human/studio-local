@@ -50,6 +50,12 @@ with tempfile.TemporaryDirectory(prefix='studio-native-video-') as directory:
         q['graphics']=[dict(id='sample',type='video',asset=marked['id'],start=0,length=45,**{'in':5.25},speed=1.5,muted=True,props=dict(x=960,y=540,width=1920,opacity=1,animation='none',style='clean'))]
         for speed in [.5,1,1.5,2]:
             candidate=copy.deepcopy(q);candidate['graphics'][0]['speed']=speed;cases.append(('sampling-'+str(fps)+'-'+str(speed),candidate))
+        # A base clip at another frame rate, across a cut, picks the exporter's source frames.
+        for rate in [50,60000/1001,30,24]:
+            if rate==fps:continue
+            candidate=project.new(width=w,height=h,fps=rate);candidate['assets']=[marked]
+            candidate['clips']=[dict(id='a',asset=marked['id'],length=20,**{'in':7},muted=True),dict(id='b',asset=marked['id'],length=25,**{'in':41},muted=True)]
+            cases.append((f'sampling-base-{fps}-in-{round(rate,2)}',candidate))
         if fps==30:
             candidate=copy.deepcopy(q);candidate['graphics'][0].update(speed=1);candidate['graphics'][0]['in']=75;cases.append(('sampling-source-end',candidate))
             # Half a frame past the file end is valid; the exporter holds the last frame there.
@@ -65,7 +71,8 @@ with tempfile.TemporaryDirectory(prefix='studio-native-video-') as directory:
     q['clips']=[dict(id='lut',asset=graded['id'],length=30,muted=True,**{'in':0})];cases.append(('lut',q))
     for name,p in cases:
         folder=work/name;folder.mkdir()
-        plan=preview.prepare(p,folder,native_images=True,native_text=True,native_motion=True,native_video=True,native_lut=True)
+        plan=preview.prepare(p,folder,native_images=True,native_text=True,native_motion=True,native_video=True,native_lut=True,native_retime=True)
+        if name.startswith('sampling-base'):assert all(c.get('retime') for c in plan['clips']),(name,'mixed-fps base clip was not played directly')
         frames=list(range(45)) if name.startswith('sampling') else [0,15,29] if name=='lut' else test_frames
         plan['testFrames']=frames
         plan['testOrientation']=name=='orientation'
