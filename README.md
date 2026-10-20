@@ -26,9 +26,9 @@ Requisitos: un Mac con chip Apple (M1 o posterior), conexión a internet durante
 - CLI y servidor MCP para que Claude edite los mismos proyectos mientras tú miras.
 - Interfaz opcional para el iPhone.
 
-## Máquina de contenido: clips y YouTube Mids
+## Máquina de contenido: vídeos, clips, mids y motion graphics
 
-Para instalar las skills y configurar tu canal, abre [`contenido/Clips verticales y mids · instalador.md`](contenido/Clips%20verticales%20y%20mids%20%C2%B7%20instalador.md). Es un archivo único que el agente sigue: prepara herramientas, pregunta por audiencia y estilo, ofrece este editor y verifica una primera pieza. También funciona sin Studio.
+Para instalar las seis skills y configurar tu canal, abre el [instalador de la máquina de contenido](contenido/Clips%20verticales%20y%20mids%20%C2%B7%20instalador.md). Prepara herramientas y pregunta por audiencia, formatos y dirección visual: referencias, estética, composición, movimiento y sonido. Incluye edición de vídeos completos, Valor concentrado, motion graphics, clips verticales y YouTube Mids; ofrece este editor y comprueba una primera pieza con tu material. Sin Studio, clipkit permite sus montajes básicos de clips y mids; las animaciones dependen de las herramientas compatibles que se elijan y comprueben.
 
 Descargar el ZIP de este repositorio incluye tanto ese instalador como el código del editor. Las dependencias se descargan durante la instalación; no es un paquete offline. El agente debe ejecutarse localmente con acceso al Mac. No incluye vídeos, proyectos ni cuentas del autor.
 

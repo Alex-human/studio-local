@@ -1,16 +1,16 @@
 # Tu máquina de contenido · instalador para Mac
 
-Versión 2.1 · 14 de octubre de 2026
+Versión 3.0 · 20 de octubre de 2026
 
 ## Empieza aquí
 
-Este archivo enseña a tu IA a convertir grabaciones largas en contenido para tu canal. Tú le explicas a quién hablas y qué aspecto quieres; ella prepara las herramientas, propone los mejores momentos y edita los vídeos contigo.
+Este archivo enseña a tu IA a editar vídeos de YouTube y convertir grabaciones largas en clips y mids. Tú le explicas a quién hablas y qué aspecto quieres; ella prepara las herramientas, concentra el discurso y edita los vídeos y sus animaciones contigo.
 
 1. Descarga este archivo en tu Mac.
 2. Abre **Claude Code en modo local** —la opción recomendada para este recorrido— o **Codex en local**, con acceso a la carpeta donde lo has descargado.
 3. Pega esta frase, indicando el archivo descargado:
 
-> Instala mi máquina de contenido siguiendo este archivo. Explícame lo necesario sin tecnicismos, pregúntame por mi canal y mi estilo, ofréceme Studio Local y ayúdame a hacer una primera prueba. No sé programar.
+> Instala mi máquina de contenido siguiendo este archivo. Explícame lo necesario sin tecnicismos, pregúntame qué formatos quiero y por la audiencia y el estilo visual de mi canal. Quiero poder editar vídeos completos con Valor concentrado y hacer motion graphics con mi propia estética, además de clips y mids. Ofréceme Studio Local y ayúdame a hacer una primera prueba. No sé programar.
 
 La IA te irá preguntando de pocas en pocas. No tienes que copiar código ni manejar la terminal. Si ya tienes una grabación, puedes dársela desde el principio.
 
@@ -20,6 +20,9 @@ El editor es [Studio Local](https://github.com/Alex-human/studio-local). Si desc
 
 - **Clips verticales:** Reels, Shorts y TikToks con una idea completa, cortes cuidados, encuadre, gancho y subtítulos con tus colores.
 - **YouTube Mids** (a veces llamados «meets»): vídeos horizontales sacados de llamadas, consultorías, podcasts o directos, con el problema, la explicación y su solución. Puede añadir capturas reales y un cierre con tu recurso.
+- **Vídeos completos de YouTube:** ordenar las tomas, construir el hilo, cuidar cortes, encuadre, textos, color y sonido. Puedes elegir una introducción elaborada y un cuerpo más limpio, o editar visualmente todo el vídeo.
+- **Valor concentrado:** quitar repeticiones y desvíos conservando significado, pruebas, matices y sincronía de los gráficos.
+- **Motion graphics de tu canal:** definir referencias, estética, composición, movimiento y sonido; probar una animación y guardarla como dirección propia. Usa las capacidades comprobadas de Studio o un motor local compatible; no incluye un generador 3D.
 - **Tu perfil de canal:** audiencia, estilo, voces, permisos y carpeta de entrega. Puedes tener varios canales sin mezclar sus estilos.
 - **Studio Local, opcional:** un editor visual para revisar y retocar el montaje, dejar comentarios sobre un fotograma y pedir a la IA que los aplique. Las skills también funcionan sin él.
 - **Entrega:** vídeos en una carpeta del Mac; si lo eliges y conectas tu cuenta, también en Drive, repartidos por días.
@@ -30,7 +33,7 @@ La IA necesita leer y escribir archivos y ejecutar programas **en tu Mac**: adju
 
 La transcripción y el render se ejecutan localmente, sin una API de pago de vídeo. Tu asistente puede procesar los textos e imágenes que lea según su servicio; «local» no significa que el chat sea offline. Drive solo se utiliza si lo eliges. La instalación necesita internet y varios GB para herramientas y modelos; tus vídeos pueden ocupar mucho más.
 
-Después podrás decir: «haz clips de esta grabación», «clip del 12:30 al 14:05», «saca mids de esta llamada», «cambia los subtítulos a amarillo» o, con Studio, «aplica mis comentarios».
+Después podrás decir: «edita este vídeo de YouTube», «aplica Valor concentrado», «haz motion graphics con el estilo de mi canal», «haz clips de esta grabación», «saca mids de esta llamada» o, con Studio, «aplica mis comentarios».
 
 ## Para el agente · acompañar la instalación
 
@@ -52,11 +55,11 @@ Usa el agente que ejecuta el encargo; solo pregunta por instalar también en otr
 
 ### 2. Extraer el paquete
 
-El documento contiene siete recursos completos y sus huellas. Guarda el siguiente extractor en un temporal y ejecútalo con **la ruta de este documento** y **la carpeta de skills**. Para Claude, por ejemplo:
+El documento contiene diez recursos completos (seis skills y cuatro herramientas o guías) y sus huellas. Guarda el siguiente extractor en un temporal y ejecútalo con **la ruta de este documento** y **la carpeta de skills**. Para Claude, por ejemplo:
 
 ```bash
-python3 extraer.py "/ruta/Clips verticales y mids · instalador.md" "$HOME/.claude/skills" --plan
-python3 extraer.py "/ruta/Clips verticales y mids · instalador.md" "$HOME/.claude/skills"
+python3 extraer.py "/ruta/Máquina de contenido · instalador.md" "$HOME/.claude/skills" --plan
+python3 extraer.py "/ruta/Máquina de contenido · instalador.md" "$HOME/.claude/skills"
 ```
 
 La petición de instalar autoriza la extracción y las dependencias que hayas explicado dentro de ese alcance. Respeta los permisos del entorno; no pidas otra aprobación para cada archivo. Con versiones distintas, compara antes y pide una sola aprobación para sustituirlas. `--actualizar` guarda copia en `~/ClipsYMids/versiones-anteriores/`. Los canales y trabajos quedan intactos. Una huella incorrecta o un paquete incompleto bloquea todas las escrituras: descarga el original de nuevo.
@@ -74,8 +77,9 @@ from pathlib import Path
 import re
 import tempfile
 
-TOOLS = {"clipkit.py", "CONFIGURAR.md", "CORTES.md", "STUDIO.md"}
-SKILLS = {"maquina-contenido", "clips-verticales", "mids-desde-grabaciones"}
+TOOLS = ("clipkit.py", "CONFIGURAR.md", "CORTES.md", "STUDIO.md")
+SKILLS = ("maquina-contenido", "clips-verticales", "mids-desde-grabaciones",
+          "editar-video", "valor-concentrado", "motion-graphics")
 
 
 def plan(document, skills, tools):
@@ -192,7 +196,7 @@ Repite `entorno --python ~/ClipsYMids/venv/bin/python` y, con `listo_para_render
 
 ### 4. Conocer el canal
 
-Sigue `~/ClipsYMids/CONFIGURAR.md`. Explica qué información sirve para seleccionar momentos y cuál para su aspecto visual. Pregunta solo las rondas de los formatos elegidos, acepta recomendaciones y guarda lo respondido para no repetir preguntas al retomar.
+Sigue `~/ClipsYMids/CONFIGURAR.md`. Explica qué información sirve para seleccionar momentos y cuál para su aspecto visual. Pregunta solo las rondas de los formatos elegidos, incluida la dirección de vídeos completos y motion cuando corresponda; acepta recomendaciones y guarda lo respondido para no repetir preguntas al retomar. Si actualizas una instalación de clips y mids, conserva su perfil y completa solo las decisiones nuevas.
 
 ### 5. Ofrecer Studio Local
 
@@ -204,11 +208,11 @@ Si lo elige, sigue `STUDIO.md`, comprueba el editor y guarda su ruta real en el 
 
 Usa una grabación real del usuario. Sin vídeo, termina como **herramientas instaladas; primera prueba pendiente** y dile qué archivo traer. No afirmes que su estilo está aprobado ni que funciona con sus vídeos.
 
-Con vídeo, comprueba duración y elige una frase completa corta dentro de ella; transcríbela y lee el resultado. Sin tramo indicado, propón uno y acepta su elección. Genera una muestra de cada formato elegido según `CONFIGURAR.md`, mírala y enséñala para ajustar el estilo. Tras su aprobación, edita una pieza corta, renderiza y verifica audio, imagen, textos y duración con la skill correspondiente. Con Studio, crea también el proyecto nativo y enséñalo en la app: un MP4 importado como único clip no es un montaje editable con textos.
+Con vídeo, comprueba duración y elige una frase completa corta dentro de ella; transcríbela y lee el resultado. Sin tramo indicado, propón uno y acepta su elección. Genera una muestra de cada formato elegido según `CONFIGURAR.md`, mírala y enséñala para ajustar el estilo. Si llevará motion, muestra también una animación con su movimiento y sonido. Tras su aprobación, edita una pieza corta, renderiza y verifica audio, imagen, textos y duración con la skill correspondiente. Con Studio, crea también el proyecto nativo y enséñalo en la app: un MP4 importado como único clip no es un montaje editable con textos.
 
 ### 7. Cerrar el onboarding
 
-Entrega qué quedó instalado, dónde, canal y estilo, prueba visible y pendientes. Enséñale tres peticiones útiles para su caso. Con Studio, explica Espacio, ⌘Z y ⌘F. Verifica que el agente reconoce las tres skills; si no, comprueba la ruta y reinicia la sesión solo cuando haga falta.
+Entrega qué quedó instalado, dónde, canal y estilo, prueba visible y pendientes. Enséñale peticiones útiles para su caso. Con Studio, explica Espacio, ⌘Z y ⌘F. Verifica que el agente reconoce las seis skills; si no, comprueba la ruta y reinicia la sesión solo cuando haga falta.
 
 Instalar no autoriza publicar, conectar cuentas nuevas, subir material, comprar servicios ni limpiar fuentes. Conserva la primera prueba para revisión; Drive, calendario y limpieza recuperable se ejecutan cuando el usuario los pida.
 
@@ -217,12 +221,15 @@ Instalar no autoriza publicar, conectar cuentas nuevas, subir material, comprar 
 | Archivo | SHA-256 |
 | --- | --- |
 | `~/ClipsYMids/clipkit.py` | `3e00a3dfb2b4b522e853c062748f6e4841df73ff748b98dc9658b9c65a39254f` |
-| `~/ClipsYMids/CONFIGURAR.md` | `599b07328a87f08322e9fa95d637db646d58f51d12ede6822e1f48590f38c838` |
-| `~/ClipsYMids/CORTES.md` | `907a0bea55a337c39574ce9d158763f369a8764d8a97039e419fcc5d5108365b` |
-| `~/ClipsYMids/STUDIO.md` | `3b9b683fbb5cb176e62625e1f1f62fbac42a4ee9e97409122642de3ba3f1b51d` |
-| `<skills>/maquina-contenido/SKILL.md` | `42ce7703c1cab7df499d9395e331204c5ec63feb980ef284668d949dd45184e6` |
-| `<skills>/clips-verticales/SKILL.md` | `c2695759b962d4ee45f59847a12cf51c14520592e153948ed7092aac557bfcba` |
-| `<skills>/mids-desde-grabaciones/SKILL.md` | `b2ace79875279bbaea05c3edfe7c2fa9741dd2e6c9cecce0736460f8941d39f1` |
+| `~/ClipsYMids/CONFIGURAR.md` | `7ab96aa7e530525e517269e4012a12d470867dbfe4e8cd542bf68b94db5a9d78` |
+| `~/ClipsYMids/CORTES.md` | `d31c9b5aae9440a754f7bfbe4854028e607e3aaacea962d6d6ab63bf608bfd76` |
+| `~/ClipsYMids/STUDIO.md` | `e3a210d5f9236fedff95fb9ea9fe1d74cf595e0936924af10a68e2124d70c192` |
+| `<skills>/maquina-contenido/SKILL.md` | `400a6269b3617a45fab331b6b7e88660e80a8a30029927118c70d986edf48816` |
+| `<skills>/clips-verticales/SKILL.md` | `f92b552e79e314b46d78eff7c2d4abcd29f4eefd7675d1753309f14d9fae0296` |
+| `<skills>/mids-desde-grabaciones/SKILL.md` | `57bc9d0c53aad46479386d02e0ad2c8ae56fe2b96ce4b7b5ad2d7d4711e4e49c` |
+| `<skills>/editar-video/SKILL.md` | `a35b3c4631aca3f55ded61e539c6be72ff9d7244c1a530c5f55131f0af115d78` |
+| `<skills>/valor-concentrado/SKILL.md` | `472207190dcedf45ff7475cc5cee01a33835bd6fef861230162aa64cc73923f3` |
+| `<skills>/motion-graphics/SKILL.md` | `5162d5e678c132c6bab9838fa566f1b37f7a1aa2c0c3e572c815fef6b5bf7033` |
 
 ## Archivos
 
@@ -1716,7 +1723,7 @@ if __name__ == "__main__":
 ~~~~~markdown
 # Configurar un canal
 
-Lo usan las skills `clips-verticales` y `mids-desde-grabaciones`. Ejecútalo cuando:
+Lo usan las skills de la máquina de contenido. Ejecútalo cuando:
 
 - no exista ningún perfil en `~/ClipsYMids/canales/*/perfil.json`;
 - el usuario pida configurar otro canal o negocio;
@@ -1729,8 +1736,8 @@ Cada canal tiene su carpeta: `~/ClipsYMids/canales/<slug>/` con `perfil.json`, `
 - Pregunta por rondas de hasta 3 preguntas, sin jerga. Usa la herramienta de preguntas de tu entorno si existe; si no, pregunta en el chat con las opciones numeradas. Divide las rondas siguientes si incluyen más decisiones.
 - Pon primero la opción recomendada y acepta «lo que recomiendes» como respuesta válida.
 - Antes de preguntar, mira lo que ya puedes saber. Si el usuario te da un vídeo suyo, ábrelo con `clipkit.py fotograma` y míralo: el encuadre y la gente que sale responden parte de las preguntas.
-- No preguntes lo que no vaya a usar. Si solo quiere clips, sáltate la ronda de mids, y al revés.
-- Al comenzar, explica en una frase la diferencia entre clips y mids y pregunta qué quiere producir: ambos (recomendado para reaprovechar grabaciones), solo clips o solo mids. Guarda la elección en `formatos`. Tras cada ronda, guarda el perfil parcial y sus pendientes: al retomar, completa únicamente lo que falte.
+- No preguntes lo que no vaya a usar. Completa solo las rondas de los formatos elegidos y la dirección visual si llevará gráficos.
+- Si el encargo ya indica el formato, úsalo. Si no, explica y pregunta qué quiere producir: vídeos completos de YouTube (`videos`), clips verticales (`clips`), respuestas horizontales extraídas de grabaciones (`mids`) o una combinación. Guarda la elección en `formatos`. Tras cada ronda, guarda el perfil parcial y sus pendientes: al retomar, completa únicamente lo que falte.
 - Si pide ayuda con guiones, explica la diferencia: aquí los guiones son las instrucciones de trabajo de la IA y los textos del gancho/CTA. Puede ayudarte a redactar un gancho o intro para grabar; no promete ideación automática ni inventa una intervención que no existe en la fuente.
 
 ## Ronda 1 · Canal y audiencia (siempre)
@@ -1780,7 +1787,19 @@ Cada canal tiene su carpeta: `~/ClipsYMids/canales/<slug>/` con `perfil.json`, `
    - Nunca.
 4. Cierre: ¿qué recurso o siguiente paso ofrece, con qué promesa y en qué enlace? ¿Tiene un vídeo de llamada a la acción grabado para pegar al final, o ganchos grabados aparte? Si falta, el CTA queda pendiente en la ficha; no se inventa.
 
-## Ronda 5 · Entrega
+## Ronda 5 · Vídeos completos y dirección visual
+
+Para un vídeo completo, pregunta qué montaje quiere: **introducción elaborada y cuerpo más limpio centrado en el valor** (punto de partida para contenido educativo), cámara limpia en todo el vídeo o edición visual de principio a fin. Confirma también formato de entrega, subtítulos y CTA real si no están en el encargo. En todos los casos se cuidan los cortes y se aplica Valor concentrado; la cantidad de efectos no decide la precisión del discurso.
+
+Antes de hacer motion graphics en cualquier formato, completa estas decisiones en rondas de hasta tres preguntas:
+
+1. **Referencias y estética:** «¿Qué vídeo o canal se parece a lo que quieres, y qué parte te gusta? ¿Prefieres dibujos o esquemas planos, capturas animadas, tarjetas, volumen o cristal, u otro estilo?». Mira los ejemplos disponibles. Sin referencia, propón una dirección sencilla para su audiencia y pide una muestra antes de fijarla. No copies nombres, personajes ni identidad ajena.
+2. **Composición e intensidad:** «¿Quieres seguir a cámara con gráficos encima, alternar con escenas a pantalla completa o una mezcla? ¿Dónde quieres más edición: en el inicio, en las explicaciones difíciles o durante todo el vídeo?». Usa la marca ya guardada para fondos, figuras, textos y color; pregunta únicamente lo que falte y qué quiere evitar.
+3. **Movimiento y sonido:** «¿Prefieres movimiento suave con pausas de lectura o más rápido? ¿Música y efectos sutiles, solo algunos acentos o sin ellos?». Ofrece una recomendación ligada al contenido. Una captura permite valorar composición, pero hace falta un vídeo para comprobar movimiento y sonido.
+
+Guarda lo decidido en `videos` y `visual`, las referencias y la aprobación de cada muestra. Un perfil antiguo conserva sus decisiones: completa las claves ausentes sin reiniciar sus clips ni mids. Si solo quiere cortes, guarda `visual.activo: false` y omite las preguntas de motion.
+
+## Ronda 6 · Entrega
 
 1. Dónde dejar los vídeos terminados: una carpeta local (por defecto `~/ClipsYMids/canales/<slug>/exportados/`) o Google Drive, si tu entorno tiene conector o acceso a su API. Para Drive, la carpeta padre.
 2. Si quiere repartir clips por días: cuántos por día. Se crean carpetas `AAAA-MM-DD · día de la semana/`.
@@ -1796,7 +1815,7 @@ Escribe `~/ClipsYMids/canales/<slug>/perfil.json`. Solo hace falta lo que difier
 
 ```json
 {
-  "formatos": ["clips", "mids"],
+  "formatos": ["videos", "clips", "mids"],
   "editor": {"modo": "clipkit", "ruta": null},
   "canal": {
     "nombre": "Nombre del canal",
@@ -1807,6 +1826,26 @@ Escribe `~/ClipsYMids/canales/<slug>/perfil.json`. Solo hace falta lo que difier
     "hablantes": [{"nombre": "Ana", "papel": "presentadora"}, {"nombre": "clientes", "papel": "invitado"}]
   },
   "fuentes_dir": "recursos/fuentes",
+  "videos": {
+    "lienzo": [1920, 1080],
+    "fps": "fuente",
+    "montaje": "intro-elaborada-cuerpo-limpio",
+    "subtitulos": "enfasis",
+    "cta": {"recurso": null, "promesa": null, "enlace": null, "video": null}
+  },
+  "visual": {
+    "activo": true,
+    "referencias": [],
+    "estetica": null,
+    "tipografia": "Helvetica Neue",
+    "colores": {"fondo": "#000000", "texto": "#FFFFFF", "acento": "#B28CFF"},
+    "composicion": null,
+    "densidad": null,
+    "movimiento": null,
+    "sonido": null,
+    "evitar": [],
+    "muestra": {"fotograma": null, "video": null, "aprobado": null}
+  },
   "clips": {
     "lienzo": [1080, 1920],
     "encuadre": "completo",
@@ -1855,19 +1894,22 @@ Valores admitidos:
 
 Si los textos se ven demasiado grandes o pequeños, cambia `tamano` y, en los subtítulos, `max_caracteres` en proporción (más tamaño, menos caracteres por línea).
 
+`videos` y `visual` son decisiones que leen las skills; no son nuevos efectos automáticos de clipkit. Sus valores de ejemplo no equivalen a preferencias aprobadas: sustituye o deja pendientes los que no se hayan decidido. Al cambiar la marca, actualiza también las propiedades de texto de cada formato elegido para mantenerlas coherentes.
+
 ## Muestra y aprobación
 
 1. Pide un vídeo real del canal (o usa el que ya te haya dado). Comprueba su duración: los segundos siguientes son ejemplos; elige un punto que exista y tenga voz. Si no hay vídeo, guarda el perfil como pendiente de muestra y no marques `aprobado`.
-2. Genera la muestra de cada formato elegido. Omite la de clips cuando solo quiera mids:
+2. Genera la muestra de cada formato elegido; ejecuta solo las órdenes que correspondan:
 
    ```bash
    python3 ~/ClipsYMids/clipkit.py muestra ~/ClipsYMids/canales/<slug>/perfil.json VIDEO.mp4 muestra-clip.png --t 60 --gancho "Así se verá\ntu gancho"
    python3 ~/ClipsYMids/clipkit.py muestra ~/ClipsYMids/canales/<slug>/perfil.json VIDEO.mp4 muestra-mid.png --formato mid --t 60
    ```
 
-3. Mira tú la imagen antes de enseñarla. La orden informa de qué fuente se pidió y cuál se usó; si devuelve un `aviso`, revisa el nombre de la familia. Comprueba también que nada tapa la cara, que se lee a tamaño de móvil y que el color de acento contrasta con el fondo.
-4. Enséñasela al usuario y ajusta hasta que diga que sí. Guarda en el perfil `"aprobado": "AAAA-MM-DD"`.
-5. Termina con dos líneas: cómo pedir clips («haz clips de este vídeo» o «clip del 12:30 al 14:05») y cómo pedir mids («saca mids de esta grabación»).
+   Para vídeos completos, usa `editar-video` y un tramo corto del montaje en el editor elegido. Para motion, usa `motion-graphics`: un fotograma y una prueba animada con voz y los efectos propuestos. No uses una muestra estática de clipkit como comprobación de esas animaciones.
+3. Mira tú la muestra antes de enseñarla. La orden de clipkit informa de qué fuente se pidió y cuál se usó; si devuelve un `aviso`, revisa el nombre de la familia. Comprueba caras libres, lectura a tamaño de móvil y contraste; en animación, también tiempos, transiciones y sonido.
+4. Enséñasela al usuario y ajusta hasta su aprobación. Guarda fecha y formatos realmente comprobados en `muestras`; la aprobación de motion, con su archivo, va en `visual.muestra`. Conserva el `aprobado` de perfiles anteriores como evidencia de sus formatos antiguos, sin extenderlo automáticamente a vídeos ni motion.
+5. Termina con peticiones de sus formatos: «edita este vídeo de YouTube», «aplica Valor concentrado», «anima esta explicación con el estilo de mi canal», «haz clips de este vídeo» o «saca mids de esta grabación».
 ~~~~~
 
 ### `~/ClipsYMids/CORTES.md`
@@ -1875,7 +1917,7 @@ Si los textos se ven demasiado grandes o pequeños, cambia `tamano` y, en los su
 ~~~~~markdown
 # Cortes precisos
 
-Método común de `clips-verticales` y `mids-desde-grabaciones`. El principio: la edición existe para que el espectador entienda mejor lo que se cuenta. Lo que no ayuda a entender, o a sostener la atención para entender, sobra.
+Método común de edición, clips y mids. El principio: la edición existe para que el espectador entienda mejor lo que se cuenta. Lo que no ayuda a entender, o a sostener la atención para entender, sobra. La pasada semántica se hace con `valor-concentrado`; este archivo resuelve la precisión de los cortes.
 
 ## 1. Leer antes de cortar
 
@@ -1947,7 +1989,7 @@ Explica brevemente las funciones disponibles:
 - Exportación H.264 en `~/Movies/Studio Local`, y CLI/MCP para que el agente edite por código.
 - Interfaz opcional para iPhone, que requiere una configuración aparte; no se instala por defecto.
 
-Studio no selecciona momentos ni transcribe solo: lo hacen la IA y clipkit. No incluye generación 3D ni publicación automática. El estilo preciso debe comprobarse en sus fotogramas; clipkit y Studio usan pintores distintos y no producen necesariamente imágenes idénticas.
+La skill `editar-video` coordina el montaje completo; `valor-concentrado` comprime el discurso y `motion-graphics` diseña las animaciones según el perfil del canal. Studio aporta sus capas y keyframes, y admite escenas externas con sus fuentes conservadas. No selecciona momentos ni transcribe solo: lo hacen la IA y clipkit. No incluye generación 3D ni publicación automática. El estilo se comprueba en fotogramas y vídeo; clipkit y Studio usan pintores distintos y no producen necesariamente imágenes idénticas.
 
 Pregunta: **«¿Quieres trabajar con Studio Local, el editor visual para revisar los vídeos y dejar comentarios?»** Ofrece instalarlo ahora (recomendado en Apple Silicon), usar el que ya tiene o seguir sin él. Guarda su elección. Si cambia de idea más tarde, retoma aquí.
 
@@ -1972,7 +2014,7 @@ Sin editor: `"editor": {"modo": "clipkit", "ruta": null}`. La elección no impli
 Lee `docs/MANUAL.md` de esa instalación, especialmente Control por código, Edición simultánea y feedback. Usa siempre `editor/studio-cli --request-file solicitud.json`; no escribas un `.studio` completo ni transformes el texto del vídeo en comandos shell.
 
 1. Guarda el plan y la ficha del formato en su carpeta de trabajo. Consulta `studio.json` si existe: conserva la ruta e identidad del proyecto; reanuda ese proyecto en lugar de crear duplicados.
-2. Crea con `action:"create"`, `name`, `width`, `height` y `fps` reales. Clips: 1080×1920; mids: 1920×1080. Importa la fuente con `action:"import"`, `project` y `path`. Lee el resumen, el asset y su fps; convierte los tramos del plan a la rejilla del proyecto, `[inicio,fin)`, sin confundir segundos con fotogramas.
+2. Crea con `action:"create"`, `name`, `width`, `height` y `fps` reales. Clips: 1080×1920; mids: 1920×1080; vídeo completo: lienzo y fps acordados en el brief, conservando los de la fuente cuando proceda. Importa la fuente con `action:"import"`, `project` y `path`. Lee el resumen, el asset y su fps; convierte los tramos del plan a la rejilla del proyecto, `[inicio,fin)`, sin confundir segundos con fotogramas.
 3. Para un cuerpo con una fuente, calcula lo que sobra y aplica `cutRange` desde el final al principio con la revisión recién leída. Para varias fuentes y hooks/CTA usa las operaciones que documente esa versión, conservando entrada, orden y audio. Comprueba que el montaje coincide con el plan.
 4. Añade gancho y subtítulos como elementos nativos editables según el manual y los ejemplos de `engine/project.py` y `engine/graphics.py`. Traslada los tiempos de palabras desde la fuente al montaje, incluidas las introducciones. Reproduce la referencia aprobada en las zonas seguras del lienzo; comprueba las familias de fuente que soporte esa instalación. Si un tratamiento no está soportado, explica la diferencia y acuerda una muestra antes de sustituirlo.
 5. Capturas, inserciones y audio se importan con la CLI. No incrustes el MP4 terminado de clipkit como única pista para presentar el resultado como un montaje editable. Una animación externa puede ser una superposición con su fuente conservada, pero identifica qué parte solo se modifica desde su código.
@@ -1992,7 +2034,7 @@ Enséñale **Espacio** para reproducir, **⌘Z** para deshacer y **⌘F** para c
 ~~~~~markdown
 ---
 name: maquina-contenido
-description: Acompañar la configuración y el uso de una máquina de contenido orgánico en Mac, con perfil propio de canal, clips verticales, YouTube Mids y Studio Local opcional. Usar al pedir configurar la máquina, explicar sus funciones, añadir un canal o continuar su onboarding.
+description: Configurar y usar una máquina de edición en Mac con perfil propio de canal, vídeos completos, clips, YouTube Mids, Valor concentrado y motion graphics. Usar al configurar la máquina, añadir un canal o retomar su onboarding.
 ---
 
 # Máquina de contenido
@@ -2002,10 +2044,13 @@ Herramientas y perfiles en `~/ClipsYMids/`. Explica al usuario lo que necesita d
 - **Configurar o retomar:** lee `instalacion.json` si existe y contrasta su estado con herramientas y archivos reales. Sigue `CONFIGURAR.md` para canal y estilo; `STUDIO.md` para el editor opcional. Si faltan las herramientas del paquete, vuelve al instalador original.
 - **Reels, Shorts, TikToks:** carga la skill instalada `clips-verticales`.
 - **YouTube Mids/meets:** carga `mids-desde-grabaciones`.
+- **Vídeo completo de YouTube:** carga `editar-video`.
+- **Concentrar el discurso de un montaje:** carga `valor-concentrado`.
+- **Animar una explicación:** carga `motion-graphics`; completa primero la dirección visual del canal si falta.
 - **Lote de ambos formatos:** usa una sola transcripción de la fuente, selecciona piezas completas para la audiencia y coordina ambas skills. Mantén su origen y ficha; no crees un número de piezas que la grabación no justifica.
 - **Comentarios de Studio:** lee `STUDIO.md` y el manual de la instalación elegida; aplica únicamente el feedback solicitado y resuélvelo tras comprobarlo.
 
-Con varios canales, deduce el activo del encargo o pregunta una vez. No repitas onboarding ya guardado; si pide cambiar estilo, actualiza solo esa parte. Una muestra aprobada fija el estilo; una instalación sin vídeo queda pendiente de prueba.
+Con varios canales, deduce el activo del encargo o pregunta una vez. No repitas onboarding ya guardado; si pide cambiar estilo, actualiza solo esa parte. Una muestra fija únicamente lo que se ha aprobado: para motion se revisa también movimiento y sonido. Una instalación sin vídeo queda pendiente de prueba.
 
 La máquina selecciona, edita, revisa y entrega. Publicar en redes, conectar cuentas o borrar material requiere el encargo correspondiente; no crea tareas ni bucles en segundo plano. Solo promete capacidades comprobadas en la instalación actual.
 ~~~~~
@@ -2069,7 +2114,7 @@ La fuente nunca se modifica ni se mueve. Cada carpeta de clip es su proyecto edi
 
 Aplica `~/ClipsYMids/CORTES.md`. Además, en clips:
 
-- Máximo valor por segundo: si una palabra, explicación o desvío se puede quitar y el clip conserva su significado, lógica, prueba y matiz, se quita.
+- Aplica `valor-concentrado` para concentrar el discurso y proteger la sincronía de los recursos ya montados.
 - El primer segundo da la información táctica o el momento con el que el espectador se identifica. Nunca abras con un conector («y luego», «entonces», «bueno») ni con un punto de una lista («punto número tres»).
 - Mueve el inicio y el final al límite de frase que dé ese contexto, aunque se aparte de la marca del usuario, e informa del ajuste.
 - Sin duración máxima, salvo que el perfil o el usuario la pidan. Sin música, efectos, B-roll ni llamada a la acción por defecto.
@@ -2199,6 +2244,7 @@ La edición de un mid es deliberadamente ligera: abrir donde empieza el problema
 - Quita saludos, despedidas y logística: buscar datos, compartir pantalla, esperar a alguien o reproducir un vídeo que el ponente resume después. Quita también repeticiones y silencios que no aportan.
 - Conserva las pausas que ayudan a comprender y el orden de lo dicho. No recombines frases.
 - Precisión de cada borde: `~/ClipsYMids/CORTES.md`.
+- Aplica `valor-concentrado` sin retirar el contexto, las pruebas ni las pausas útiles del mid. Para animaciones solicitadas, carga `motion-graphics` y respeta el perfil del canal.
 - Para saber quién habla: el contenido manda. Como pista, quien tiene micrófono propio suena con más graves y brillo que quien llega por Zoom o altavoz; confírmalo siempre leyendo.
 
 Carpeta del trabajo:
@@ -2304,4 +2350,107 @@ Igual que en `clips-verticales` (sección «Exporta y sube los clips»): carpeta
 - No publiques ni programes en YouTube ni en otra plataforma sin una petición expresa para ese envío concreto. Deja todo listo y pide confirmación.
 - Respeta la privacidad de los participantes por encima de la productividad.
 - Instala solo las dependencias comprendidas en el encargo y explicadas al usuario; pregunta por cualquier instalación adicional.
+~~~~~
+
+### `<skills>/editar-video/SKILL.md`
+
+~~~~~markdown
+---
+name: editar-video
+description: Editar un vídeo completo de YouTube desde una o varias tomas, con cortes, Valor concentrado, dirección visual propia del canal y motion graphics cuando ayuden. Usar al pedir editar un vídeo entero; para extraer piezas de una grabación, usar clips-verticales o mids-desde-grabaciones.
+---
+
+# Editar un vídeo completo
+
+La edición ayuda a entender y sostiene la atención. Entrega un montaje coherente con la promesa del vídeo y el perfil del canal, sin imponer la estética de quien distribuyó estas skills.
+
+## Preparar
+
+Lee el perfil en `~/ClipsYMids/canales/<slug>/perfil.json`. Si faltan `videos` o la dirección `visual`, completa solo esas partes con `~/ClipsYMids/CONFIGURAR.md`. Deduce del encargo el tema, el material, el cierre y la entrega; pregunta únicamente lo que no se pueda comprobar. Una petición de editar deja el proyecto listo para revisión; exporta o sube cuando esté incluido en el encargo.
+
+Para el montaje completo con varias tomas y gráficos, usa Studio según `~/ClipsYMids/STUDIO.md`. Si todavía no lo eligió, ofrece esa opción. Sin Studio, clipkit puede hacer un montaje básico de una fuente con cortes y las inserciones del formato `mid`; no promete las capas y animaciones de Studio. Conserva en el trabajo lo que quede pendiente.
+
+Guarda en `~/ClipsYMids/canales/<slug>/trabajos/<video>/` el brief, la transcripción por fuente, el plan con tiempos y `studio.json` si corresponde. Reutiliza el proyecto existente y su revisión guardada; los cambios manuales del usuario mandan sobre un plan anterior.
+
+## Montar el discurso
+
+1. Inspecciona las tomas y transcribe una vez cada fuente con `clipkit.py` según `CORTES.md`. Identifica retomas, intervenciones y ganchos o CTA grabados aparte. No ordenes por nombre de archivo si el discurso indica otro orden.
+2. Construye un solo hilo: el principio plantea qué se va a resolver; cada bloque aporta contexto, mecanismo, prueba o aplicación; el cierre cumple la promesa. Conserva las intervenciones necesarias para entender respuestas y objeciones. Inserta cada CTA real donde tenga sentido; si faltan su recurso o enlace, déjalo pendiente.
+3. Aplica `valor-concentrado` a todo el montaje antes de añadir recursos visuales. Menos efectos nunca significa cortes menos precisos. No comprimas por una duración arbitraria ni retires una condición necesaria.
+4. Relee el discurso resultante y comprueba las uniones con el audio. Ajusta encuadre, orientación y color según las fuentes; no apliques una LUT de cámara sin comprobar cómo se grabó.
+
+## Darle la dirección del canal
+
+Respeta `videos.montaje` y `visual`: puede ser cámara limpia, introducción elaborada seguida de una explicación con menos recursos, o edición visual en todo el vídeo. El cambio de densidad sigue el contenido, sin un minuto fijo.
+
+- Planifica por frase: qué se dice, qué debe entenderse y qué imagen o transformación lo explica. Mantén la cámara cuando ya explica bien.
+- Carga `motion-graphics` para las animaciones. Usa capturas reales cuando se mencionan una interfaz, un vídeo, un documento o una cifra; guarda su URL o archivo y el momento de origen. Una recreación o un ejemplo hipotético se identifica como tal.
+- Mantén títulos y subtítulos legibles, sincronizados y fuera de caras y controles de la plataforma. Los subtítulos siguen literalmente el audio comprobado.
+- Separa voz, música y efectos. Usa recursos aportados o con licencia comprobada, anotando procedencia y créditos; las bibliotecas privadas del distribuidor no vienen incluidas. La voz debe entenderse también en los momentos de mayor intensidad musical.
+
+## Revisar y entregar
+
+Comprueba el montaje completo: significado y promesa, palabras y uniones, sincronía de gráficos y subtítulos, encuadre, color, transiciones y audio. Usa fotogramas y renders cortos para detalles; un fotograma no prueba el movimiento. Tras corregir, vuelve a revisar la escena afectada y sus entradas y salidas. Si cambias cortes después de animar, vuelve a pasar `valor-concentrado` para proteger las anclas y la sincronía.
+
+Deja el proyecto guardado y localizable. Indica qué se revisó completo, por muestras o con escucha pendiente. Cuando se pida el MP4, exporta desde la revisión actual y verifica con `clipkit.py verificar`; la entrega local o en Drive sigue la sección de entrega de `clips-verticales`. Editar no autoriza publicar en redes ni borrar originales.
+~~~~~
+
+### `<skills>/valor-concentrado/SKILL.md`
+
+~~~~~markdown
+---
+name: valor-concentrado
+description: Concentrar el valor de un vídeo informativo retirando repeticiones, reformulaciones y desvíos sin perder significado, pruebas, matices ni sincronía. Usar al pedir Valor concentrado, mejorar el ritmo o comprimir el discurso de un vídeo, clip o mid ya montado.
+---
+
+# Valor concentrado
+
+Retira una palabra, explicación o desvío solo si se conservan el significado, la lógica, las pruebas, los matices y el efecto narrativo. Conserva condiciones, negaciones, cifras, promesas, CTA, emoción útil y personalidad. Una repetición intencionada permanece si aporta un énfasis que se perdería.
+
+## Partir del montaje actual
+
+Lee `~/ClipsYMids/CORTES.md` y el perfil del canal. Con clipkit, el plan y sus subtítulos son el montaje. Con Studio, lee `~/ClipsYMids/STUDIO.md`, abre el proyecto y registra revisión, fps, duración, clips y recursos. Reconstruye el texto desde los tramos y entradas de fuente actuales, incluyendo todas las tomas y cambios de velocidad; una transcripción vieja del bruto no representa la timeline.
+
+## Decidir y cortar
+
+1. Busca ideas repetidas, reformulaciones sin precisión nueva, muletillas, anticipaciones ya cumplidas, resúmenes consecutivos y desvíos ajenos a la promesa.
+2. Lee lo anterior y lo posterior como una sola frase. Descarta el corte si rompe gramática, causa y efecto, contexto, prueba o matiz. No recombines palabras para atribuir otra afirmación al hablante.
+3. Afina cada borde con el audio según `CORTES.md`; los tiempos ASR son orientativos. Conserva palabras completas, colas de voz y respiraciones necesarias.
+4. Anota cada intervalo retirado, motivo y desplazamiento esperado de los elementos que vienen después. Conserva fuente, duración y ancla semántica de imágenes, texto, motion y SFX pertinentes. Reajusta los que crucen un corte; retíralos solo cuando desaparezca la idea que representaban.
+5. En Studio, comprueba los vínculos de voz, gráficos, subtítulos y efectos; una cama musical puede quedar libre para mantener continuidad. Música coreografiada al beat necesita reanclaje o fundido. Convierte a fotogramas y aplica los `cutRange` de mayor a menor tiempo con la revisión vigente. Ante conflicto, relee y reconstruye el mapa antes de editar. Con clipkit, modifica los tramos y regenera los tiempos de subtítulos conservando sus correcciones.
+
+## Validar
+
+Compara duración y fotogramas antes y después, y los recursos protegidos por ID, fuente, duración y desplazamiento. Revisa ambos lados de cada unión: frase natural, palabra íntegra, sin clic, negro, salto musical ni recurso desincronizado. Comprueba el guardado y la reproducción en el editor elegido.
+
+Deja el montaje listo para revisión y declara el alcance de escucha y visionado. Las métricas y la transcripción no certifican por sí solas el ritmo. Esta pasada no autoriza exportar, subir, publicar ni borrar fuentes.
+~~~~~
+
+### `<skills>/motion-graphics/SKILL.md`
+
+~~~~~markdown
+---
+name: motion-graphics
+description: Crear o corregir animaciones explicativas siguiendo la identidad visual del canal, con texto, objetos, cámara y sonido sincronizados. Usar al pedir motion graphics o animar una explicación; configura primero la dirección del canal si falta.
+---
+
+# Motion graphics del canal
+
+Lee `visual` en `~/ClipsYMids/canales/<slug>/perfil.json` y el brief del trabajo. Si falta la dirección o cambia el estilo, sigue la ronda visual de `~/ClipsYMids/CONFIGURAR.md`. No presupongas muñecos de palo, fondo negro, cristal, una fuente ni los colores del distribuidor.
+
+## Diseñar desde el significado
+
+- Parte de una frase de la timeline guardada: qué se transforma, por qué y qué permanece. Guarda sus anclas, tiempos, recursos y decisiones en `escenas/<nombre>/` dentro del trabajo.
+- Elige una relación visual clara: comparación, recorrido, causa y efecto, acumulación o cambio de estado. Una sucesión de rótulos que repite la voz no sustituye la explicación.
+- Sigue las referencias aprobadas en silueta, paleta, tipografía, composición, textura y densidad. No deduzcas movimiento o sonido de una captura estática. Con material real, conserva la procedencia y no alteres cifras para aparentar otro resultado.
+- Mantén identidad y continuidad espacial: objetos equivalentes llegan al mismo tamaño; los físicos tienen apoyo coherente; las abstracciones respetan su propia lógica. Cada movimiento de cámara enfoca o revela algo, con recorrido, llegada y reposo. Evita movimiento perpetuo y apariciones sin relación con el discurso.
+- Ajusta texto y márgenes al formato final. Un gráfico horizontal reducido no es automáticamente una versión vertical legible. Las entradas siguen la palabra o idea; deja tiempo de lectura y sincroniza los efectos con sus eventos, sin tapar la voz.
+
+## Producir y comprobar
+
+1. Prepara un fotograma completo y una prueba animada de entrada, desarrollo y salida. Mira ambos y pide aprobación del estilo si todavía no existe. Guarda el resultado por canal, sin aprobar toda una animación solo por una imagen.
+2. Con Studio, sigue `~/ClipsYMids/STUDIO.md` y su manual. Reutiliza títulos, tarjetas, imágenes y keyframes numéricos nativos cuando reproduzcan la dirección elegida. Conserva el proyecto y las capas editables; no programes efectos que esa versión no soporte.
+3. Para dibujos o escenas que excedan esas capas, comprueba primero qué motor local disponible puede producirlos. Conserva código y recursos junto a la escena e importa su vídeo como superposición. Explica qué parte se edita desde ese código. Sin motor compatible, deja esa escena pendiente y ofrece una representación que pueda comprobarse; la instalación del paquete no instala ni certifica un generador 3D.
+4. Revisa el vídeo real con su voz: inicio, desarrollo, final, transiciones consecutivas, lectura, encuadre, sincronía y sonido. Comprueba también una muestra del render final, no solo el visor. Una decodificación correcta no demuestra una estética aprobada.
+5. Integra sobre la revisión vigente y vuelve a comprobar entradas y salidas en el montaje. Si cambia el discurso, actualiza las anclas y la sincronía. Entrega proyecto, fuentes y prueba comprobada; exporta o publica solo dentro del encargo.
 ~~~~~
