@@ -18,6 +18,15 @@ class VolumeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=self.root) as folder:
             result=render.render_audio(p,Path(folder))
             return np.frombuffer(render.run(['-v','error','-i',result,'-f','f32le','-']),np.float32)
+    def test_split_clip_sounds_continuous_and_a_real_cut_keeps_its_fades(self):
+        whole=copy.deepcopy(self.p);whole['clips']=[dict(id='a',asset='tone',length=30,**{'in':0})]
+        split=copy.deepcopy(self.p);split['clips']=[dict(id='a',asset='tone',length=11,**{'in':0}),dict(id='b',asset='tone',length=19,**{'in':11})]
+        self.assertTrue(np.allclose(self.mix(whole),self.mix(split),atol=1e-5))
+        self.assertEqual([(l['id'],round(l['length']*30)) for l in preview.audio_layers(split)],[('a',30)])
+        cut=copy.deepcopy(self.p);cut['clips']=[dict(id='a',asset='tone',length=11,**{'in':0}),dict(id='b',asset='tone',length=19,**{'in':12})]
+        self.assertEqual([l['id'] for l in preview.audio_layers(cut)],['a','b'])
+        other=copy.deepcopy(split);other['clips'][1]['volumeDb']=-6
+        self.assertEqual([l['id'] for l in preview.audio_layers(other)],['a','b'])
     def test_percent_levels_match_native_and_export_for_every_role(self):
         for kind,role in [('clips','voice'),('audio','voice'),('audio','music'),('audio','sfx')]:
             p=copy.deepcopy(self.p)

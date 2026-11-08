@@ -71,3 +71,29 @@ class FeedbackTests(unittest.TestCase):
  def test_poll_separates_project_revision_and_feedback_version(self):
   self.create();a=self.call('list');self.assertTrue(self.call('list',since=a['version'],projectRevision=0)['unchanged'])
   editor.dispatch(dict(action='ops',project=str(self.path),revision=0,ops=[dict(op='cutRange',start=5,end=15)]));b=self.call('list',since=a['version'],projectRevision=0);self.assertEqual(b['notes'][0]['currentFrame'],35)
+
+ def test_empty_annotation_copies_clean_frame_and_same_strokes_do_not_rasterize_twice(self):
+  import feedback
+  n=self.create()
+  with patch.object(feedback,'annotate',wraps=feedback.annotate) as draw:
+   n=self.call('capture',id=n['id'])
+   self.assertEqual(draw.call_count,1)
+   n=self.update(n,dict(text='Texto sin dibujo',strokes=[],status='open'))
+   self.assertEqual(draw.call_count,1)
+  self.assertEqual(Path(n['files']['image']).read_bytes(),Path(n['files']['annotated']).read_bytes())
+  stroke=dict(tool='pen',color='#ffad5c',width=.01,points=[[.1,.1],[.7,.7]])
+  with patch.object(feedback,'annotate',wraps=feedback.annotate) as draw:
+   n=self.update(n,dict(strokes=[stroke]))
+   self.assertEqual(draw.call_count,1)
+   n=self.update(n,dict(text='Otro texto',strokes=[stroke]))
+   self.assertEqual(draw.call_count,1)
+   n=self.update(n,dict(strokes=[]))
+   self.assertEqual(draw.call_count,2)
+  self.assertEqual(Path(n['files']['image']).read_bytes(),Path(n['files']['annotated']).read_bytes())
+ def test_capture_has_bounded_decode_and_keeps_draft_on_timeout(self):
+  n=self.update(self.create(),{'text':'Texto conservado'})
+  with patch.object(render,'frame',side_effect=ValueError('capture timeout')) as frame:
+   with self.assertRaises(ValueError):self.call('capture',id=n['id'])
+   self.assertEqual(frame.call_args.kwargs['timeout'],30)
+  n=self.call('get',id=n['id'])
+  self.assertEqual((n['status'],n['capture'],n['text']),('draft','error','Texto conservado'))

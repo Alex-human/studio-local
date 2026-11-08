@@ -1,4 +1,4 @@
-"""Short image cue, stored locally at 48 kHz."""
+"""Short image cue stored locally at 48 kHz."""
 from pathlib import Path
 import wave
 import numpy as np

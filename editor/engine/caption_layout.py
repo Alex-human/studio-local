@@ -1,10 +1,9 @@
-"""Measured layout for the editable words of the Editorial morado preset."""
+"""Measured layout for the editable words of the Instagram clip preset."""
 import math
 import graphics
 
-LAYOUT = dict(name='Editorial morado', version=1, width=1080, height=1920,
+LAYOUT = dict(name='Gancho nativo', version=2, width=1080, height=1920,
               videoX=44, videoY=681, videoWidth=992, videoHeight=558,
-              hookX=540, hookY=562.5, hookSize=60.75,
               captionX=540, captionY=1320, captionSize=72,
               safeWidth=880, lineHeight=88, accent='#B28CFF')
 DESIGN_SCALE = 1920 / LAYOUT['width']
@@ -77,6 +76,9 @@ def reflow(members):
     for member in members:
         member['props']['text'] = ' '.join(member['props']['text'].split())
     positions = word_positions([g['props'] for g in members])
+    # A group placed lower or higher than the preset keeps its own first line.
+    shift = min(g['props'].get('y', 0) for g in members) - min(y for _, y in positions)
+    positions = [(x, y + shift) for x, y in positions]
     for index, (member, (x, y)) in enumerate(zip(members, positions)):
         member.update(captionGroup=token, captionIndex=index)
         member['props'].update(x=x, y=y)

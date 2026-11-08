@@ -1,4 +1,6 @@
 'use strict';
+const timelineMaxZoom=100;
+$('timelineZoom').max=Math.log2(timelineMaxZoom);
 const timelineTracks=[['video','Vídeo','clips'],['overlays','Superposición','graphics'],['graphics','Gráficos','graphics'],['captions','Texto','captions'],['voice','Voz','audio'],['music','Música','audio'],['sfx','Efectos','audio']];
 let cutStart=null,cutEnd=null,rulerDrag=null,edgeDrag=null,timelineFocused=false;
 function isLinked(kind,item){return kind==='clips'||(item.linked??p.syncTracks?.[kind==='audio'?item.role:kind==='graphics'&&item.type==='video'?'overlays':kind]??true);}
@@ -7,6 +9,20 @@ function validRange(){return cutStart!==null&&cutEnd!==null&&cutEnd>cutStart&&cu
 function clearCutRange(){cutStart=cutEnd=null;}
 function timelineShape(project){return JSON.stringify(project?.clips.map(c=>[c.id,c.in,c.length,c.speed]));}
 function timelineWidth(){return Math.max(600,$('timelineScroll').clientWidth-160)*zoom;}
+let timelineFollow=null;
+function stopTimelineFollow(){timelineFollow=null;}
+function followTimelinePlayhead(){
+ if(!playbackPlaying||rulerDrag||edgeDrag)return;
+ const scroller=$('timelineScroll'),visible=Math.max(1,scroller.clientWidth-160),target=cursor/Math.max(1,frames())*timelineWidth()-visible/2;
+ if(!timelineFollow){
+  const offset=target-scroller.scrollLeft;
+  // A visible head left of center travels naturally before the tracks follow.
+  timelineFollow={offset:offset>=-visible/2&&offset<0?null:offset,start:performance.now()};
+ }
+ if(timelineFollow.offset===null){if(target<=scroller.scrollLeft)return;timelineFollow.offset=0;}
+ const t=Math.min(1,(performance.now()-timelineFollow.start)/650);
+ scroller.scrollLeft=target-timelineFollow.offset*(1-t*t*(3-2*t));
+}
 function videoRanges(){let start=0;return p.clips.map(item=>{const range={item,start,end:start+item.length};start=range.end;return range;});}
 function mediaHandle(item,edge){const a=asset(item.asset),speed=item.speed||1;if(!a?.duration)return 0;return edge==='start'?Math.max(0,Math.floor(((item.in||0)+1e-7)/speed)):Math.max(0,Math.floor((a.duration*p.fps-(item.in||0)-item.length*speed+1e-7)/speed));}
 function edgeLimits(range,edge){
@@ -174,7 +190,7 @@ function drawLinkInspector(box,item,kind){
 function setTimelineZoom(next,clientX){
  if(!p)return;const scroller=$('timelineScroll'),old=timelineWidth(),visible=Math.max(1,scroller.clientWidth-160),head=cursor/Math.max(1,frames())*old;
  const anchor=clientX===undefined?(head>=scroller.scrollLeft&&head<=scroller.scrollLeft+visible?head-scroller.scrollLeft:visible/2):Math.max(0,Math.min(visible,clientX-scroller.getBoundingClientRect().left-160));
- const fraction=(scroller.scrollLeft+anchor)/old;zoom=Math.max(1,Math.min(64,next));drawTimeline();scroller.scrollLeft=Math.max(0,fraction*timelineWidth()-anchor);
+ const fraction=(scroller.scrollLeft+anchor)/old;zoom=Math.max(1,Math.min(timelineMaxZoom,next));drawTimeline();scroller.scrollLeft=Math.max(0,fraction*timelineWidth()-anchor);stopTimelineFollow();
 }
 function rulerFrame(event){const r=$('ruler').getBoundingClientRect();return Math.max(0,Math.min(frames()-1,Math.floor((event.clientX-r.left)/r.width*frames())));}
 $('ruler').onpointerdown=e=>{if(e.button!==0||!frames())return;e.preventDefault();timelineFocused=true;void pausePlayback();rulerDrag={frame:rulerFrame(e),x:e.clientX};$('ruler').setPointerCapture(e.pointerId);};

@@ -4,6 +4,7 @@ from pathlib import Path
 import fcntl
 ROOT=Path(__file__).resolve().parents[1]
 PENDING=ROOT/'.build/pending-update.json'
+BINARIES=('probe','studio-export')
 
 def atomic(path,value):
     temp=path.with_suffix('.tmp');temp.write_text(json.dumps(value));os.replace(temp,path)
@@ -12,7 +13,7 @@ def verified_stage(value):
     if stage.parent!=ROOT/'.build' or not stage.name.startswith('app-'):raise ValueError('Build fuera de la carpeta de preparación')
     bundle=stage/'Studio Local.app'
     subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(bundle)],check=True)
-    if not (stage/'probe').is_file():raise ValueError('Falta probe en el build')
+    if not all((stage/name).is_file() for name in BINARIES):raise ValueError('Faltan binarios en el build')
     return stage
 
 def running():
@@ -27,7 +28,7 @@ def promote(stage):
     if target.exists():target.rename(backup)
     try:
         bundle.rename(target)
-        os.replace(stage/'probe',ROOT/'runtime/probe')
+        for name in BINARIES:os.replace(stage/name,ROOT/'runtime'/name)
     except BaseException:
         if target.exists() and not bundle.exists():target.rename(bundle)
         if backup.exists():backup.rename(target)

@@ -120,6 +120,27 @@ class TextPreviewTests(unittest.TestCase):
                 np.testing.assert_array_equal(np.array(expected),np.array(actual))
                 np.testing.assert_array_equal(np.array(expected),np.array(graphics.title_layer(size,props)))
 
+    def test_centered_lines_and_empty_paragraph_keep_native_sprite_equal_to_render(self):
+        size=(1080,1920)
+        props=dict(text='MMMMMMMMMM\nMM\n\nMMMM',x=960,y=600,size=104,weight=650,align='center')
+        for content in (props['text'],'MMMM\n\nMMMMMMMMMM\nMM'):
+            props['text']=content
+            canonical=graphics.title_layer(size,props)
+            sprite,rect=graphics.text_sprite(size,props)
+            actual=Image.new('RGBA',size);actual.alpha_composite(sprite,tuple(rect[:2]))
+            np.testing.assert_array_equal(np.array(canonical),np.array(actual))
+            pixels=np.array(canonical)
+            white=(pixels[:,:,0]>240)&(pixels[:,:,1]>240)&(pixels[:,:,2]>240)&(pixels[:,:,3]>240)
+            rows=np.flatnonzero(white.any(axis=1));groups=np.split(rows,np.where(np.diff(rows)>1)[0]+1)
+            self.assertEqual(len(groups),3)
+            for group in groups:
+                columns=np.flatnonzero(white[group].any(axis=0))
+                self.assertLessEqual(abs((columns[0]+columns[-1])/2-540),2)
+        self.p['graphics']=[self.title(**props)]
+        centered=self.prepare()['images'][0]['path']
+        self.p['graphics'][0]['props']['align']='left'
+        self.assertNotEqual(centered,self.prepare()['images'][0]['path'])
+
     def test_caption_rgba_pixels_match_original_pass(self):
         size=(960,1706);w,h=size;sc=w/1920;content='Primera línea\nSegunda línea\nÚltima'
         expected=Image.new('RGBA',size);d=ImageDraw.Draw(expected);lines=content.split('\n')[:3]

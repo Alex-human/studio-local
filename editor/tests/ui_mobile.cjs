@@ -6,7 +6,7 @@ function node(id='') {
   const n = {disabled:false,hidden:false,open:false,value:'',style:{},children:[],events:{},currentTime:0,
     clientWidth:393,classList:{toggle(){}},setAttribute(){},append(...items){this.children.push(...items)},after(){},
     replaceChildren(){this.children=[]},querySelectorAll(){const out=[];(function walk(n){for(const c of n.children){if(c.row)out.push(c);walk(c);}})(this);return out},getBoundingClientRect(){return {width:100,height:100,left:0,top:0}},
-    getContext(){return {beginPath(){},moveTo(){},lineTo(){},stroke(){},ellipse(){},rect(){}}},focus(){},pause(){},
+    getContext(){return {beginPath(){},moveTo(){},lineTo(){},stroke(){},ellipse(){},rect(){}}},focus(){},scrollIntoView(options){this.scrolled=options;},pause(){},
     removeAttribute(){this.removed=(this.removed||0)+1},load(){},play(){return Promise.resolve()},canPlayType(){return 'probably'},readyState:4,
     showModal(){this.open=true},close(){this.open=false;queueMicrotask(()=>this.events.close?.())},
     addEventListener(type,fn){this.events[type]=fn}};
@@ -15,7 +15,7 @@ function node(id='') {
   return n;
 }
 const context = {assert,console,structuredClone,crypto:require('node:crypto').webcrypto,setInterval(){},setTimeout(){},clearTimeout(){},setImmediate,queueMicrotask,
-  performance,DirectPlayer:class {constructor(...args){this.args=args} release(){this.released=(this.released||0)+1} load(){return Promise.resolve(true)} seek(){} stop(){}},devicePixelRatio:1,navigator:{userAgent:'test'},document:{hidden:false,getElementById:node,createElement:()=>node(),
+  performance,AbortController,DirectPlayer:class {constructor(...args){this.args=args} release(){this.released=(this.released||0)+1} load(){return Promise.resolve(true)} seek(){} stop(){}},devicePixelRatio:1,navigator:{userAgent:'test'},document:{hidden:false,getElementById:node,createElement:()=>node(),
     querySelector(){return null},querySelectorAll(selector){return selector.includes('dialog textarea') ? [node('noteText'),node('hookText')] : []},addEventListener(){}},
   window:{events:{},addEventListener(type,fn){(this.events[type]??=[]).push(fn)},removeEventListener(type,fn){this.events[type]=(this.events[type]||[]).filter(x=>x!==fn)}},localStorage:{setItem:(k,v)=>memory.set(k,v),getItem:k=>memory.get(k),removeItem:k=>memory.delete(k)}};
 vm.createContext(context);
@@ -87,6 +87,28 @@ code+=`
   await $('checkReceipt').onclick();await new Promise(setImmediate);
   assert.equal(stored(draftKey('P')),null,'dialog close must not resurrect the acknowledged draft');
   assert.equal(stored(pendingKey),null);
+  // An unknown receipt cannot be accepted without a server-side fence.
+  persist(pendingKey,{requestId:'unknown',project:'P',action:'note'});
+  query=async req=>{assert.equal(req.settle,true);return {status:'unknown'};};
+  await $('acceptState').onclick();assert.ok(stored(pendingKey),'unknown stays blocked');
+  query=async req=>({status:'processing'});await $('acceptState').onclick();assert.ok(stored(pendingKey));
+  query=async req=>({status:'done',response:{ok:false,cancelled:true,error:'Cancelled before arrival'}});
+  await $('acceptState').onclick();assert.equal(stored(pendingKey),null);
+  noteDraft={project:'P',revision:1,noteId:'retry-capture',frame:15,text:'Retained after failure',strokes:[]};
+  $('noteText').value=noteDraft.text;saveDraft();
+  api=async()=>({ok:false,error:'Capture timed out'});
+  query=async()=>({notes:[{id:'retry-capture',revision:1,frame:15,version:2,text:'Retained after failure',strokes:[]}]});
+  await $('saveNote').onclick();assert.equal(noteDraft.version,2,'retry uses the persisted draft version without closing the dialog');
+  assert.equal(noteDraft.text,'Retained after failure');
+  // A matching persisted draft can be retried with its real version, without overwriting different content.
+  const saved={id:'draft',revision:1,frame:15,version:2,text:'Kept',strokes:[]};
+  persist(draftKey('P'),{project:'P',revision:1,noteId:'draft',frame:15,text:'Kept',strokes:[]});
+  notes=[saved];openNote();assert.equal(noteDraft.version,2);assert.equal($('loadSavedNote').hidden,true);
+  $('noteText').value='Unsaved changes';saveDraft();openNote({...saved,version:3,text:'Someone else'});
+  assert.equal(noteDraft.text,'Unsaved changes');assert.equal(noteDraft.version,2);assert.equal($('loadSavedNote').hidden,false);
+  query=async()=>({notes:[{...saved,version:3,text:'Someone else'}]});await $('loadSavedNote').onclick();
+  assert.equal(noteDraft.text,'Someone else');assert.equal(noteDraft.version,3);
+  noteDraft=null;localStorage.removeItem(draftKey('P'));$('noteDialog').close();
   $('hook').onclick();$('textChoices').children[0].onclick();$('hookText').value='Unsent hook';$('hookText').oninput();$('textDialog').close();
   await new Promise(setImmediate);$('hook').onclick();
   assert.equal($('textPicker').open,true,'text selection stays reachable after editing another text');
@@ -133,6 +155,22 @@ code+=`
   assert.equal(frame,299,'keyboard selection still selects a reachable frame in the item');
   assert.equal(JSON.stringify(p),beforeTimeline,'navigation does not edit the montage');
   timelineTouch=false;timelineTap=null;
+  // Zoom keeps the visible playhead fixed, including immediately after a paused touch/scroll.
+  p={...p,clips:[{id:'long',asset:'asset',in:0,length:18000}]};selection=null;frame=1800;
+  const beforeZoom=JSON.stringify(p);
+  for (const active of [false,true]) for (const hold of [0,Infinity]) {
+    playing=active;timelineHold=hold;scale=16;
+    const at=active&&!hold ? $('timeline').clientWidth*.35 : 173;
+    $('timeline').scrollLeft=frame/p.fps*scale-at;
+    for (const id of ['zoomIn','zoomIn','zoomOut','zoomOut']) {
+      $(id).onclick();
+      assert.ok(Math.abs(frame/p.fps*scale-$('timeline').scrollLeft-at)<.001,'zoom must keep the playhead in place, paused or playing, even during the manual-scroll hold');
+      assert.equal(frame,1800,'zoom does not seek');
+      assert.equal(playing,active,'zoom does not change playback');
+      assert.equal(JSON.stringify(p),beforeZoom,'zoom does not edit the montage');
+    }
+  }
+  playing=false;timelineHold=0;
   directSupported=true;direct.broken=true;direct.args[4](Error('sin descodificador'));
   assert.equal(directSupported,false,'a browser that cannot decode the video goes on with the composed preview');
   // A text is rewritten from where it is: selected in the timeline, or tapped on the picture.
@@ -168,7 +206,72 @@ code+=`
   api=async()=>({ok:false,error:'rechazado'});
   drag();await fire('pointermove',70);await fire('pointerup',70);
   assert.equal(block('a').style.width,'300px','a rejected trim does not leave a false gap');
-  console.log('PASS · mobile UI: timeline taps, editing, rewriting a text, delete, gap-free trim, playback reuse, speed, drafts and lost acknowledgements');
+  // Overshooting a short source gap must recover the available context, rather than reject the entire gesture.
+  p={id:'P',name:'cut',revision:4,fps:30,clips:[{id:'a',asset:'asset',in:60,length:300},{id:'b',asset:'asset',in:375,length:300}],
+     graphics:[],captions:[],audio:[],assets:[{id:'asset',duration:30}]};
+  selection={kind:'clips',id:'a'};scale=30;renderTimeline();
+  api=async req=>{sent=req;return {ok:true,result:{}}};
+  const recoverEdge=async(id,edge,x)=>{
+    selection={kind:'clips',id};renderTimeline();
+    dragEdge({clientX:100,pointerId:7,preventDefault(){},stopPropagation(){}},block(id).row,edge,block(id));
+    await fire('pointermove',x);
+  };
+  await recoverEdge('a','end',200);
+  assert.equal(block('a').style.width,'315px','the preview stops at the next source piece');
+  assert.equal(block('b').style.transform,'translateX(15px)','later clips follow the recoverable amount');
+  await fire('pointerup',200);
+  assert.equal(sent.op.delta,15,'recover the half-second gap even when dragged much further');
+  assert.equal(sent.revision,4,'the gesture retains its starting revision');
+  await recoverEdge('b','start',0);await fire('pointerup',0);
+  assert.equal(sent.op.delta,-15,'the other side recovers the same gap');
+  await recoverEdge('a','start',0);await fire('pointerup',0);
+  assert.equal(sent.op.delta,-60,'first clip stops at the start of its source');
+  await recoverEdge('b','end',500);await fire('pointerup',500);
+  assert.equal(sent.op.delta,225,'last clip stops at the end of its source');
+  selection={kind:'clips',id:'a'};$('edge').value='end';$('edgeSeconds').value='5';
+  await resize(true);assert.equal(sent.op.delta,15,'the Borders dialog uses the same recoverable amount');
+  p.clips[1].in=360;renderTimeline();sent=null;
+  await recoverEdge('a','end',200);await fire('pointerup',200);
+  assert.equal(sent,null,'a contiguous source boundary creates no zero-frame write');
+  await $('extend').onclick();assert.equal(sent,null);
+  assert.match($('notice').textContent,/No queda más/,'a boundary with no hidden context explains why it cannot extend');
+  p.clips[0].speed=2;p.clips[1].in=690;
+  await recoverEdge('a','end',200);await fire('pointerup',200);
+  assert.equal(sent.op.delta,15,'source gaps are converted using clip speed');
+  await recoverEdge('a','end',-500);await fire('pointerup',-500);
+  assert.equal(sent.op.delta,-299,'shortening always leaves at least one frame');
+  // Volume: the selected element with its own sound and the three tracks of the mix, saved when the finger lifts.
+  p={id:'P',name:'vol',revision:3,fps:30,mixer:{voice:0,music:-6.0206,sfx:0},clips:[{id:'a',asset:'mute',in:0,length:300}],graphics:[],captions:[],
+     audio:[{id:'m',asset:'song',role:'music',start:0,length:90,volumeDb:-60}],assets:[{id:'mute',audio:false},{id:'song',audio:true}]};
+  selection={kind:'clips',id:'a'};
+  $('volume').onclick();assert.equal($('volumeDialog').open,true);
+  assert.equal($('volumeItem').children[0].className,'hint','a clip without sound offers only the mix');
+  const mix=$('volumeMix').children.map(row=>row.children[2].value);
+  assert.equal(mix.join(),'100,50,100','voice, music and effects as a percentage of the original');
+  $('volumeDialog').close();selection={kind:'audio',id:'m'};$('volume').onclick();
+  const slider=$('volumeItem').children[0].children[2];
+  assert.equal(slider.value,0,'a silenced element shows 0 %');
+  api=async req=>{sent=req;return {ok:true,result:{}}};
+  slider.value='80';slider.oninput();assert.equal($('volumeItem').children[0].children[1].textContent,'80 %');
+  sent=null;await slider.onchange();
+  assert.deepEqual(sent.op,{type:'volume',kind:'audio',id:'m',percent:80},'lifting the finger saves the element volume');
+  const music=$('volumeMix').children[1].children[2];music.value='120';await music.onchange();
+  assert.deepEqual(sent.op,{type:'mixer',role:'music',percent:120},'and the track volume');
+  // Return to the actual opened project among 38 cards, preserving folder/search.
+  const catalog=Array.from({length:38},(_,i)=>({id:'clip-'+(i+1),name:'Clip '+String(i+1).padStart(2,'0'),folder:'clips',duration:10,width:160,height:90}));
+  const montage=structuredClone(p);
+  query=async req=>req.action==='library'?{folders:[{id:'clips',name:'Clips'}],projects:catalog}:{project:{...montage,id:req.project},notes:[]};
+  direct.load=async()=>false;folder='clips';$('search').value='Clip';lastProject=null;
+  await loadLibrary();assert.equal($('projects').children.length,38);
+  await $('projects').children[26].onclick();assert.equal(lastProject,'clip-27');
+  catalog.reverse();await loadLibrary();
+  const last=$('projects').children.find(n=>n.className.includes('last-opened'));
+  assert.equal(last.children[1].children[0].textContent,'Clip 27');assert.equal(last.scrolled.block,'center');
+  assert.equal($('projects').children.filter(n=>n.scrolled).length,1);assert.equal(folder,'clips');assert.equal($('search').value,'Clip');
+  $('search').value='Clip 28';showLibrary();assert.equal($('projects').children.length,1);assert.equal($('projects').children[0].scrolled,undefined,'filtering does not force a scroll');
+  $('search').value='Clip';catalog.splice(catalog.findIndex(x=>x.id==='clip-27'),1);await loadLibrary();
+  assert.equal($('projects').children.some(n=>n.scrolled),false,'a removed project does not select its old row number');
+  console.log('PASS · mobile UI: playhead-anchored zoom, timeline taps, editing, rewriting a text, delete, gap-free trim, playback reuse, speed, volume, drafts and lost acknowledgements');
 })().catch(error=>{console.error(error);process.exitCode=1});`;
 context.process=process;
 vm.runInContext(code,context);

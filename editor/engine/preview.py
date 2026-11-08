@@ -13,7 +13,7 @@ import project
 import render
 import sounds
 
-CACHE_VERSION=8
+CACHE_VERSION=9
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()[:28]
@@ -167,6 +167,7 @@ def text_layer(item,kind,size,cache):
             os.replace(temp_path,path)
         finally:temp_path.unlink(missing_ok=True)
     animation=dict(animation='none') if kind=='captions' else dict(enter=item.get('props',{}).get('enter',.45),opacity=item.get('props',{}).get('opacity',1))
+    if kind!='captions' and props.get('style')=='native':animation['exit']='cut'
     return dict(kind='text',path=str(path),start=item['start'],length=item['length'],offset=item.get('offset',0),
         motionLength=item.get('motionLength',item['length']),props=animation,
         keyframes={key:sorted(copy.deepcopy(points),key=lambda point:point['frame']) for key,points in item.get('keyframes',{}).items()},
@@ -200,16 +201,16 @@ def image_cues(p,cache):
 def audio_layers(p):
     """Unmixed source segments for instant native preview; export remains unchanged."""
     assets={a['id']:a for a in p['assets']};result=[];offset=0;duration=project.duration(p)
-    for clip in p['clips']:
-        asset=assets[clip['asset']]
+    for run in project.voice_runs(p['clips']):
+        clip=run[0];asset=assets[clip['asset']];length=sum(c['length'] for c in run)
         if asset.get('audio'):
             result.append(dict(id=clip['id'],path=asset['path'],start=offset/p['fps'],source=clip.get('in',0)/p['fps'],
-                length=clip['length']/p['fps'],speed=clip.get('speed',1),role='voice',
+                length=length/p['fps'],speed=clip.get('speed',1),role='voice',
                 volume=(0 if clip.get('muted') else project.audio_gain(clip.get('volumeDb',0))*project.audio_gain(p['mixer']['voice'])),
                 fadeIn=clip.get('fadeIn',0)/p['fps'],fadeOut=clip.get('fadeOut',0)/p['fps'],
-                fadeOffset=clip.get('fadeOffset',0)/p['fps'],fadeLength=clip.get('fadeLength',clip['length'])/p['fps'],
-                deClickOffset=clip.get('_playbackFadeOffset',0)/p['fps'],deClickLength=clip.get('_playbackFadeLength',clip['length'])/p['fps']))
-        offset+=clip['length']
+                fadeOffset=clip.get('fadeOffset',0)/p['fps'],fadeLength=clip.get('fadeLength',length)/p['fps'],
+                deClickOffset=clip.get('_playbackFadeOffset',0)/p['fps'],deClickLength=sum(c.get('_playbackFadeLength',c['length']) for c in run)/p['fps']))
+        offset+=length
     for clip in p['graphics']:
         if clip.get('type')!='video' or clip.get('hidden') or clip['start']>=duration:continue
         asset=assets[clip['asset']]

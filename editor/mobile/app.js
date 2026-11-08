@@ -2,6 +2,7 @@ import {DirectPlayer} from '/direct-player.js';
 const $ = id => document.getElementById(id);
 const video = $('video');
 const names = {clips:'Vídeo',overlays:'Superposición',graphics:'Gráficos',captions:'Subtítulos',voice:'Voz',music:'Música',sfx:'Efectos'};
+let lastProject = null;
 let library, folder = '', p = null, frame = 0, selection = null, notes = [], busy = false;
 let scale = 16, playing = false, playbackOffset = 0, mediaGeneration = 0, noteDraft = null, textDraft = null;
 let pollBusy = false, drawing = false, stroke = null, navigation = 0, dragging = false;
@@ -30,10 +31,13 @@ function modal() { return !!document.querySelector('dialog[open]'); }
 function persist(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function stored(key) { try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; } }
 async function api(req) {
-  const response = await fetch('/api', {method:'POST',headers:{'Content-Type':'application/json','X-Studio-Mobile':'1'},body:JSON.stringify(req)});
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'No se pudo conectar con el Mac.');
-  return data;
+  const control=new AbortController(),timer=setTimeout(()=>control.abort(),45000);
+  try {
+    const response = await fetch('/api', {method:'POST',signal:control.signal,headers:{'Content-Type':'application/json','X-Studio-Mobile':'1'},body:JSON.stringify(req)});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo conectar con el Mac.');
+    return data;
+  } finally { clearTimeout(timer); }
 }
 // What the player measured on this phone, for the Mac's log: timings and failures, never content.
 const reports=[];let reportTimer=null;
@@ -56,9 +60,9 @@ async function query(req) {
 function task(fn) { return (...args) => Promise.resolve().then(() => fn(...args)).catch(e => { notice(e.message); status('Revisa el aviso'); }); }
 function controls() {
   const locked = busy || !!stored(pendingKey);
-  for (const id of ['back','undo','redo','split','edges','hook','remove','rewrite','itemLink','linkAll','saveNote','saveText','shorten','extend']) $(id).disabled = locked;
+  for (const id of ['back','undo','redo','split','edges','hook','remove','volume','rewrite','itemLink','linkAll','saveNote','saveText','shorten','extend']) $(id).disabled = locked;
   for (const node of document.querySelectorAll('#layerControls button, dialog textarea, dialog input, dialog select, dialog .close')) node.disabled=locked;
-  for(const id of ['drawToggle','drawUndo','discardDraft','loadSavedText']) $(id).disabled=locked;
+  for(const id of ['drawToggle','drawUndo','discardDraft','loadSavedNote','loadSavedText']) $(id).disabled=locked;
   $('edges').disabled ||= !total();
   $('remove').disabled ||= !selected();
   $('itemLink').disabled ||= selection?.kind === 'clips';
@@ -111,8 +115,9 @@ $('checkReceipt').onclick = task(async () => {
 $('acceptState').onclick = task(async () => {
   const req = stored(pendingKey);
   if (!req) return $('recoverDialog').close();
-  const receipt = await query({action:'receipt',requestId:req.requestId});
-  if (receipt.status === 'processing') { $('recoverText').textContent='El Mac sigue procesando la acción. Espera y comprueba el guardado.'; return; }
+  const receipt = await query({action:'receipt',requestId:req.requestId,settle:true});
+  if (!['pending','done'].includes(receipt.status)) { $('recoverText').textContent='El Mac sigue procesando la acción. Espera y comprueba el guardado.'; return; }
+  if(receipt.status==='done')return $('checkReceipt').onclick();
   await openProject(req.project, true);
   localStorage.removeItem(pendingKey);
   $('recoverDialog').close();
@@ -124,9 +129,11 @@ $('recoverDialog').addEventListener('cancel', event => event.preventDefault());
 async function loadLibrary() {
   const token=++navigation; pause(); releaseMedia(); const result=await query({action:'library'}); if(token!==navigation)return; library=result; p = null;
   $('library').hidden = false; $('editor').hidden = true; $('back').hidden = true;
-  $('title').textContent = 'Studio'; status('Conectado a tu Mac'); showLibrary();
+  $('title').textContent = 'Studio'; status('Conectado a tu Mac');
+  const last=showLibrary();last?.scrollIntoView({block:'center'});
 }
 function showLibrary() {
+  let last=null;
   const chips = $('folders'); chips.replaceChildren();
   for (const item of [{id:'',name:'Todos'},...library.folders]) {
     const button = element('button', item.id === folder ? 'active' : '', item.name);
@@ -137,12 +144,15 @@ function showLibrary() {
   const list = library.projects.filter(x => (!folder || x.folder === folder) && normalize(x.name).includes(term));
   $('projects').replaceChildren();
   for (const item of list) {
-    const button = element('button','project');
+    const button = element('button',item.id===lastProject?'project last-opened':'project');
+    if(item.id===lastProject){last=button;button.setAttribute('aria-current','true');}
     const info = element('div'); info.append(element('strong','',item.name),element('small','',`${seconds(item.duration)} · ${item.width} × ${item.height}`));
+    if(item.id===lastProject)info.append(element('small','last-label','Último abierto'));
     button.append(element('div','aspect',item.height > item.width ? '9 : 16' : '16 : 9'),info,element('span','arrow','›'));
     button.onclick = task(() => openProject(item.id)); $('projects').append(button);
   }
   if (!list.length) $('projects').append(element('p','empty','No hay proyectos aquí.'));
+  return last;
 }
 $('search').oninput = showLibrary;
 $('back').onclick = task(loadLibrary);
@@ -153,6 +163,7 @@ async function openProject(id, recovery = false) {
   pause(); status('Abriendo proyecto…');
   const state = await query({action:'state',project:id});
   if(token!==navigation)return;
+  lastProject=id;
   frame = 0; selection = null; notes = state.notes;
   $('library').hidden = true; $('editor').hidden = false; $('back').hidden = false;
   applyProject(state.project); renderNotes(); status('Guardado en tu Mac');
@@ -178,6 +189,7 @@ function applyProject(next) {
   frame = Math.max(0,Math.min(frame,total()-1));
   if (selection && !selected()) selection = null;
   $('title').textContent = p.name; $('scrub').max = Math.max(0,total()-1);
+  if($('volumeDialog').open)renderVolume();
   renderTimeline(); renderLayers(); controls();
   if(changed)loadDirect();
   showFrame();
@@ -368,18 +380,38 @@ function renderTimeline() {
   $('itemLink').hidden = !row || row.kind === 'clips'; $('rewrite').hidden = !editable(row);
   if (row) $('itemLink').textContent = linked(row) ? '🔗 Unida' : 'Libre';
 }
+function edgeDelta(row,edge,delta) {
+  const item=row.item,speed=item.speed||1;
+  let available=edge === 'start' ? row.start : total()-row.start-item.length;
+  if (row.kind === 'clips' || row.kind === 'audio' || row.kind === 'graphics' && item.type === 'video') {
+    const asset=p.assets.find(a=>a.id===item.asset);
+    const source=edge === 'start' ? item.in||0 : (asset?.duration||0)*p.fps-(item.in||0)-item.length*speed;
+    const handle=Math.max(0,Math.floor((source+1e-7)/speed));
+    available=row.kind === 'clips' ? handle : Math.min(available,handle);
+  }
+  if (row.kind === 'clips') {
+    const index=p.clips.findIndex(c=>c.id===item.id),other=p.clips[index+(edge === 'start' ? -1 : 1)];
+    if (other?.asset === item.asset) {
+      const gap=edge === 'start' ? (item.in||0)-(other.in||0)-other.length*(other.speed||1) : (other.in||0)-(item.in||0)-item.length*speed;
+      available=Math.min(available,Math.max(0,Math.floor((gap+1e-7)/speed)));
+    }
+  }
+  available=Math.max(0,available);
+  return edge === 'start' ? Math.max(-available,Math.min(item.length-1,delta)) : Math.max(1-item.length,Math.min(available,delta));
+}
 function dragEdge(event,row,edge,block) {
   event.preventDefault(); event.stopPropagation(); if (busy || dragging || stored(pendingKey)) return;
   pause(); const x = event.clientX, pointer = event.pointerId, revision = p.revision, id = p.id; let delta = 0;
-  // Shortening a video clip closes the gap: what comes after it follows the edge while dragging, as it will once saved.
+  // Video edges ripple following linked elements, using only the source context the engine can restore.
   const after = row.kind === 'clips' ? [...$('tracks').querySelectorAll('.block')].filter(b => linked(b.row) && b.row.start >= row.start+row.item.length) : [];
   dragging=true;
   const move = e => {
     if (e.pointerId !== pointer) return;
-    delta = Math.round((e.clientX-x)/scale*p.fps);
+    const requested = Math.round((e.clientX-x)/scale*p.fps);
+    delta = edgeDelta(row,edge,requested);
     const length = row.item.length+(edge === 'end' ? delta : -delta);
-    if (length > 0) { block.style.width = `${Math.max(4,length/p.fps*scale)}px`; for (const b of after) b.style.transform = `translateX(${(length-row.item.length)/p.fps*scale}px)`; }
-    $('selectedLabel').textContent = `${edge === 'start'?'Inicio':'Final'}: ${delta>0?'+':''}${(delta/p.fps).toFixed(2)} s`;
+    block.style.width = `${Math.max(4,length/p.fps*scale)}px`; for (const b of after) b.style.transform = `translateX(${(length-row.item.length)/p.fps*scale}px)`;
+    $('selectedLabel').textContent = `${edge === 'start'?'Inicio':'Final'}: ${delta>0?'+':''}${(delta/p.fps).toFixed(2)} s${delta !== requested?' · Límite alcanzado':''}`;
   };
   // The finger is followed on the window: the gesture ends wherever it is lifted, and the timeline always shows what was saved.
   const end = task(async e => {
@@ -391,8 +423,14 @@ function dragEdge(event,row,edge,block) {
   });
   window.addEventListener('pointermove',move,true); window.addEventListener('pointerup',end,true); window.addEventListener('pointercancel',end,true);
 }
-$('zoomIn').onclick = () => { scale = Math.min(256,scale*2); renderTimeline(); };
-$('zoomOut').onclick = () => { scale = Math.max(1,scale/2); renderTimeline(); };
+function zoomTimeline(factor) {
+  const timeline=$('timeline'),at=frame/p.fps*scale-timeline.scrollLeft;
+  scale=Math.max(1,Math.min(256,scale*factor));
+  renderTimeline();
+  timeline.scrollLeft=Math.max(0,frame/p.fps*scale-at);
+}
+$('zoomIn').onclick = () => zoomTimeline(2);
+$('zoomOut').onclick = () => zoomTimeline(.5);
 $('split').onclick = task(async () => {
   pause();
   const row = selected();
@@ -412,7 +450,8 @@ async function resize(extend) {
   const row = selected(), amount = Number($('edgeSeconds').value);
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('Escribe una duración positiva.');
   const edge = $('edge').value;
-  const delta = Math.max(1,Math.round(amount*p.fps))*(edge === 'start' ? -1 : 1)*(extend ? 1 : -1);
+  const delta = edgeDelta(row,edge,Math.max(1,Math.round(amount*p.fps))*(edge === 'start' ? -1 : 1)*(extend ? 1 : -1));
+  if (!delta) throw new Error(extend ? 'No queda más material o espacio en este borde.' : 'El elemento ya tiene la duración mínima.');
   if (await mutate({action:'edit',op:{type:'resize',kind:row.kind,id:row.item.id,edge,delta}})) $('edgeDialog').close();
 }
 $('shorten').onclick = task(() => resize(false)); $('extend').onclick = task(() => resize(true));
@@ -432,6 +471,31 @@ $('linkAll').onclick = task(()=>mutate({action:'edit',op:{type:'linkTrack',track
 for (const [id,panel,other] of [['notesTab','notesPanel','layersPanel'],['layersTab','layersPanel','notesPanel']]) $(id).onclick=()=>{
   $(panel).hidden=false; $(other).hidden=true; $('notesTab').setAttribute('aria-selected',String(id==='notesTab')); $('layersTab').setAttribute('aria-selected',String(id==='layersTab'));
 };
+
+// Volume as on the desktop: a percentage of the original sound (100 % unchanged, 0 % silent), for the selected element
+// and for each track of the mix. Saved when the finger lifts; the plan is then rebuilt with the new levels.
+function percent(db,muted) { return muted||db<=-60?0:Math.round(10**(db/20)*1000)/10; }
+function sound(row) {
+  const asset=p.assets.find(a => a.id === row.item.asset);
+  if (row.kind === 'audio' || (row.kind === 'clips' || row.track === 'overlays') && asset?.audio) return {db:row.item.volumeDb??0,muted:row.item.muted};
+  if (row.item.type === 'image' && row.item.props?.sound && row.item.props.animation !== 'none') return {db:row.item.props.soundDb??-18};
+  return null;
+}
+function volumeSlider(parent,name,level,op) {
+  const value=percent(level.db,level.muted),row=element('label','volume'),out=element('output','',`${Math.round(value)} %`),range=element('input');
+  Object.assign(range,{type:'range',min:0,max:Math.max(200,Math.ceil(value)),step:1,value:Math.round(value)});
+  range.oninput=()=>{out.textContent=`${range.value} %`;};
+  range.onchange=task(()=>mutate({action:'edit',op:{...op,percent:Number(range.value)}}));
+  row.append(element('span','',name),out,range); parent.append(row);
+}
+function renderVolume() {
+  const row=selected(),own=row&&sound(row);
+  $('volumeItem').replaceChildren(); $('volumeMix').replaceChildren();
+  if (own) volumeSlider($('volumeItem'),`${names[row.track]} · ${label(row)}`,own,{type:'volume',kind:row.kind,id:row.item.id});
+  else $('volumeItem').append(element('p','hint','Toca en el montaje un clip, una música o un efecto para cambiar solo su volumen.'));
+  for (const role of ['voice','music','sfx']) volumeSlider($('volumeMix'),names[role],{db:p.mixer?.[role]??0},{type:'mixer',role});
+}
+$('volume').onclick = () => { pause(); renderVolume(); $('volumeDialog').showModal(); };
 
 function openText(row) {
   if (!editable(row)) return; choose(row);
@@ -488,21 +552,44 @@ function saveDraft() {
 function openNote(note=null) {
   pause();
   const draft=stored(draftKey(p.id));
+  note??=draft&&notes.find(n=>n.id===draft.noteId);
+  if(note&&draft?.noteId===note.id&&draft.text===note.text&&JSON.stringify(draft.strokes)===JSON.stringify(note.strokes))
+    Object.assign(draft,{version:note.version,revision:note.revision,frame:note.frame});
   if(note && draft && draft.noteId!==note.id && (draft.text.trim()||draft.strokes.length)) {notice('Conservamos tu borrador. Termina o descártalo antes de abrir otro comentario.');note=null;}
   noteDraft=draft && (!note||draft.noteId===note.id) ? draft : note ? {project:p.id,revision:note.revision,noteId:note.id,frame:note.frame,version:note.version,text:note.text,strokes:structuredClone(note.strokes)} : {project:p.id,revision:p.revision,noteId:crypto.randomUUID(),frame,text:'',strokes:[]};
   $('noteText').value=noteDraft.text; $('noteTime').textContent=`${seconds(noteDraft.frame/p.fps)} · FOTOGRAMA ${noteDraft.frame}`;
   $('noteImage').src=noteDraft.version ? `/note/${noteDraft.project}/${noteDraft.noteId}.png` : `/media/${noteDraft.project}/${noteDraft.revision}/${noteDraft.frame}.jpg`;
+  $('loadSavedNote').hidden=!note||!draft||draft.noteId!==note.id||draft.version===note.version;
   $('noteDialog').showModal(); drawing=false; updateDrawingMode(); saveDraft(); $('noteText').focus();
 }
 $('comment').onclick=()=>openNote(); $('noteText').oninput=saveDraft;
 const discard=element('button','','Descartar borrador local');discard.id='discardDraft';discard.type='button';$('noteStatus').after(discard);
 discard.onclick=()=>{localStorage.removeItem(draftKey(noteDraft.project));noteDraft=null;$('noteDialog').close();};
+const loadSavedNote=element('button','','Descartar borrador y cargar nota del Mac');loadSavedNote.id='loadSavedNote';loadSavedNote.type='button';discard.after(loadSavedNote);
+loadSavedNote.onclick=task(async()=>{
+  const pid=noteDraft.project,nid=noteDraft.noteId;
+  const saved=(await query({action:'state',project:pid})).notes.find(n=>n.id===nid);
+  if(!saved)throw new Error('La nota no está disponible. Tu borrador se conserva.');
+  localStorage.removeItem(draftKey(pid));noteDraft=null;openNote(saved);
+});
 $('noteDialog').addEventListener('close',saveDraft);
 $('saveNote').onclick=task(async()=>{
   saveDraft();
   if (!$('noteText').value.trim() && !noteDraft.strokes.length) throw new Error('Escribe un comentario o dibuja una indicación.');
-  if (await mutate({action:'note',...noteDraft,text:$('noteText').value})) {
-    const pid=noteDraft.project; noteDraft=null; localStorage.removeItem(draftKey(pid)); $('noteDialog').close(); await reload();
+  try {
+    if (await mutate({action:'note',...noteDraft})) {
+      const pid=noteDraft.project; noteDraft=null; localStorage.removeItem(draftKey(pid)); $('noteDialog').close(); await reload();
+    }
+  } catch(error) {
+    // Capture can fail after the draft reached the Mac. Reconcile only identical content.
+    try {
+      notes=(await query({action:'state',project:noteDraft.project})).notes;
+      const saved=notes.find(n=>n.id===noteDraft.noteId);
+      if(saved&&saved.text===noteDraft.text&&JSON.stringify(saved.strokes)===JSON.stringify(noteDraft.strokes)) {
+        Object.assign(noteDraft,{version:saved.version,revision:saved.revision,frame:saved.frame});saveDraft();
+      } else $('loadSavedNote').hidden=!saved;
+    } catch {} // A failed read must not replace the original error or discard the local draft.
+    throw error;
   }
 });
 function updateDrawingMode() { $('drawing').classList.toggle('active',drawing); $('drawToggle').setAttribute('aria-pressed',String(drawing)); paint(); }

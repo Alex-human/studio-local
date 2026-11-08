@@ -502,7 +502,7 @@ export class DirectPlayer {
       } else if(item.kind==='text'||item.type==='text'||item.type==='title') {
         const [x,y,sw,sh]=item.rect;
         const enter=props.animation==='none'?1:smooth(local/fps/(props.enter||.45));
-        const exit=props.animation==='none'?1:smooth(((item.motionLength??item.length)-local)/fps/.2);
+        const exit=props.animation==='none'||props.exit==='cut'?1:smooth(((item.motionLength??item.length)-local)/fps/.2);
         ctx.globalAlpha=clamp(enter*exit*(props.opacity??1));
         ctx.drawImage(source,x,y+(1-enter)*35*s,sw,sh);
       } else {

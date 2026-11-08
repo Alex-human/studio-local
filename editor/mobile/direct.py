@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import threading
 import tempfile
@@ -30,6 +31,14 @@ def transcode(args, seconds):
 def pixel(path):
     info=subprocess.run([str(render.FF),'-hide_banner','-nostdin','-i',path],capture_output=True,timeout=10).stderr.decode(errors='replace')
     return 'p010le' if '10le' in next((line for line in info.splitlines() if 'Video:' in line),'') else 'nv12'
+
+
+@functools.lru_cache
+def rotation(path):
+    """Degrees of the display matrix of a phone recording (0 when there is none)."""
+    info=subprocess.run([str(render.FF),'-hide_banner','-nostdin','-i',path],capture_output=True,timeout=10).stderr.decode(errors='replace')
+    m=re.search(r'rotation of (-?[\d.]+) degrees',info)
+    return round(float(m.group(1)))%360 if m else 0
 
 
 def cadence(fps):
@@ -61,6 +70,7 @@ class DirectMedia:
         kind = 'audio' if audio else asset['kind']
         spec = dict(path=str(source.resolve()), kind=kind, color=color or {}, start=start, lut=None if audio else asset.get('lut'))
         if size != 640 and kind != 'audio': spec['size'] = size
+        if kind == 'video' and rotation(spec['path']): spec['rotation'] = rotation(spec['path'])   # new key: never reuse a sideways proxy
         # Generation 4 is what a slow phone link carries: sound in plain MP4 at 96 kb/s, video at 450 kb/s.
         key = hashlib.sha256(json.dumps([2 if 'size' in spec or kind == 'image' else 4, spec, stat.st_size, stat.st_mtime_ns], sort_keys=True).encode()).hexdigest()[:32]
         name = key + '.' + {'video': 'mp4', 'audio': 'm4a', 'image': 'png'}[kind]
@@ -145,11 +155,16 @@ class DirectMedia:
                             '-c:v','h264_videotoolbox','-b:v',bitrate,'-maxrate',maxrate,'-bufsize',bufsize,
                             '-g',max(1,round(rate/2)),'-pix_fmt','yuv420p','-movflags','+faststart',out]
                 hardware=[f'scale_vt=w={w}:h={h}','hwdownload',f"format={pixel(spec['path'])}",*filters[1:]]
-                try:
-                    transcode(['-v','error','-hwaccel','videotoolbox','-hwaccel_output_format','videotoolbox_vld',*source,'-vf',','.join(hardware),*output],CHUNK)
-                except ValueError:
-                    # Some imported codecs have no hardware frames; same output contract.
-                    transcode(['-y','-v','error',*source,'-vf',','.join(filters),*output],CHUNK)
+                if spec.get('rotation'):
+                    # A phone recording held on its side: FFmpeg cannot apply its automatic rotation to VideoToolbox
+                    # surfaces, and scale_vt squeezed and turned the picture. Decode in hardware, rotate and scale in memory.
+                    transcode(['-v','error','-hwaccel','videotoolbox',*source,'-vf',','.join(filters),*output],CHUNK)
+                else:
+                    try:
+                        transcode(['-v','error','-hwaccel','videotoolbox','-hwaccel_output_format','videotoolbox_vld',*source,'-vf',','.join(hardware),*output],CHUNK)
+                    except ValueError:
+                        # Some imported codecs have no hardware frames; same output contract.
+                        transcode(['-y','-v','error',*source,'-vf',','.join(filters),*output],CHUNK)
             os.replace(out, dest)
 
     def prune(self):

@@ -1,4 +1,5 @@
 """Deterministic motion templates. Pixel coordinates use the 1920 x 1080 design grid."""
+import json
 import math
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +14,9 @@ def smooth(t):
 
 def progress(t, start, length):
     return smooth((t-start)/max(length, .001))
+
+def exit_opacity(item, props, local, fps):
+    return 1 if item['type']=='title' and props.get('style')=='native' else progress((item.get('motionLength',item['length'])-local)/fps,0,.2)
 
 def lerp(a, b, t):
     return a + (b-a)*t
@@ -30,8 +34,8 @@ def font(size, weight=580, italic=False):
     except (AttributeError,OSError): pass
     return f
 
-def text(draw, xy, content, size=52, color='white', anchor='mm', weight=580):
-    draw.text(xy, str(content), font=font(size,weight), fill=color, anchor=anchor, stroke_width=0)
+def text(draw, xy, content, size=52, color='white', anchor='mm', weight=580, align='left'):
+    draw.text(xy, str(content), font=font(size,weight), fill=color, anchor=anchor, stroke_width=0, align=align)
 
 def fit_text(content, max_width, size, weight=580):
     while size > 18 and max((font(size,weight).getlength(line) for line in str(content).splitlines()),default=0) > max_width:
@@ -115,6 +119,39 @@ def sticker_hook(layer, content, x, y, size, width, color):
     draw=ImageDraw.Draw(layer)
     for line,base in rows:draw.text((x,base),line,font=face,fill=color,anchor='ms')
 
+def wrap_words(words, face, limit):
+    lines=[];line=''
+    for word in words:
+        if line and face.getlength(line+' '+word)>limit:lines.append(line);line=word
+        else:line=(line+' '+word).strip()
+    return lines+[line]
+
+@lru_cache(maxsize=128)
+def native_hook_parts(content, x, y, size, width):
+    """Instagram's own Reels text with background, measured on a native capture: Instagram Sans UI Heavy, centred
+    lines and one rounded card around them. Written line breaks stay unless a line overflows; then the text is balanced."""
+    own=ASSETS/'fonts/instagram/InstagramSansUI-Heavy.ttf'  # Meta's font is not redistributable: add it yourself or use Inter
+    face=ImageFont.truetype(str(own if own.exists() else ASSETS/'fonts/editorial/InterVariable.ttf'),max(8,round(size)))
+    pad=size*.405;limit=width-2*pad
+    lines=[line.strip() for line in content.splitlines() if line.strip()] or [' ']
+    if max(face.getlength(line) for line in lines)>limit:
+        words=' '.join(lines).split();count=len(wrap_words(words,face,limit))
+        spans=sorted({face.getlength(' '.join(words[i:j])) for i in range(len(words)) for j in range(i+1,len(words)+1)})
+        lines=next(wrap_words(words,face,span) for span in spans if len(wrap_words(words,face,span))<=count)
+    pitch=size*1.155;top=y-(size*1.715+(len(lines)-1)*pitch)/2
+    inks=[face.getbbox(line,anchor='ms') for line in lines]
+    card=(x+min(i[0] for i in inks)-pad,top,x+max(i[2] for i in inks)+pad,top+size*1.715+(len(lines)-1)*pitch)
+    return face,[(line,top+size*1.207+i*pitch) for i,line in enumerate(lines)],card,size*.19
+
+def native_hook(layer, content, x, y, size, width, color, fill):
+    face,rows,card,radius=native_hook_parts(content,x,y,size,width)
+    left,top=math.floor(card[0]),math.floor(card[1]);w,h=math.ceil(card[2])-left+1,math.ceil(card[3])-top+1
+    mask=Image.new('L',(w*4,h*4))  # supersampled card; an integer shift of the sprite keeps the same pixels
+    ImageDraw.Draw(mask).rounded_rectangle([(card[0]-left)*4,(card[1]-top)*4,(card[2]-left)*4,(card[3]-top)*4],radius*4,fill=255)
+    layer.paste(ImageColor.getrgb(fill)[:3]+(255,),(left,top),mask.resize((w,h),Image.BOX))
+    draw=ImageDraw.Draw(layer)
+    for line,base in rows:draw.text((x,base),line,font=face,fill=color,anchor='ms')
+
 def title_layer(size, props, enter=1, origin=(0,0), canvas_width=None):
     """Canonical title glyphs, also used on a small transparent preview surface."""
     w=canvas_width or size[0];sc=w/1920
@@ -126,12 +163,13 @@ def title_layer(size, props, enter=1, origin=(0,0), canvas_width=None):
     if props.get('style')=='instagram':
         instagram_hook(d,title,x,y,font_size,w*.86,color,accent,props.get('box',False))
     elif props.get('style')=='sticker':sticker_hook(layer,title,x,y,font_size,w*.86,color)
+    elif props.get('style')=='native':native_hook(layer,title,x,y,font_size,w*.9,color,accent)
     else:
         weight=props.get('weight',580);font_size=fit_text(title,w*.86,font_size,weight)
         shadow=Image.new('RGBA',size)
-        text(ImageDraw.Draw(shadow),(x,y+3*sc),title,font_size,(0,0,0,220),weight=weight)
+        text(ImageDraw.Draw(shadow),(x,y+3*sc),title,font_size,(0,0,0,220),weight=weight,align=props.get('align','left'))
         layer=Image.alpha_composite(layer,shadow.filter(ImageFilter.GaussianBlur(6*sc)))
-        d=ImageDraw.Draw(layer);text(d,(x,y),title,font_size,color,weight=weight)
+        d=ImageDraw.Draw(layer);text(d,(x,y),title,font_size,color,weight=weight,align=props.get('align','left'))
         if props.get('subtitle'):text(d,(x,y+font_size*.9),props['subtitle'],font_size*.43,accent)
     return layer
 
@@ -148,8 +186,8 @@ def caption_layer(size, content, origin=(0,0), canvas_size=None):
 def text_sprite(size, props=None, caption=None):
     """Tight rest-position glyph texture; integer translation keeps Pillow rasterization."""
     w,h=size;sc=w/1920;d=ImageDraw.Draw(Image.new('L',(1,1)));boxes=[]
-    def bounds(x,y,content,font_size,weight=580,italic=False,stroke=0,pad=0):
-        box=d.textbbox((x,y),str(content),font=font(font_size,weight,italic),anchor='mm',stroke_width=stroke)
+    def bounds(x,y,content,font_size,weight=580,italic=False,stroke=0,pad=0,align='left'):
+        box=d.textbbox((x,y),str(content),font=font(font_size,weight,italic),anchor='mm',stroke_width=stroke,align=align)
         boxes.append((box[0]-pad,box[1]-pad,box[2]+pad,box[3]+pad))
     if caption is not None:
         lines=caption.split('\n')[:3]
@@ -168,10 +206,12 @@ def text_sprite(size, props=None, caption=None):
         elif props.get('style')=='sticker':
             face,rows,bands,_=sticker_hook_parts(title,x,y,font_size,w*.86)
             boxes+=[(l-1,t-1,r+2,b+2) for l,t,r,b in bands]+[d.textbbox((x,base),line,font=face,anchor='ms') for line,base in rows]
+        elif props.get('style')=='native':
+            face,rows,card,_=native_hook_parts(title,x,y,font_size,w*.9)
+            boxes+=[(card[0]-1,card[1]-1,card[2]+2,card[3]+2)]+[d.textbbox((x,base),line,font=face,anchor='ms') for line,base in rows]
         else:
             weight=props.get('weight',580);font_size=fit_text(title,w*.86,font_size,weight)
-            bounds(x,y,title,font_size,weight)
-            bounds(x,y+3*sc,title,font_size,weight,pad=math.ceil(24*sc+4))
+            bounds(x,y+3*sc,title,font_size,weight,pad=math.ceil(24*sc+4),align=props.get('align','left'))
             if props.get('subtitle'):bounds(x,y+font_size*.9,props['subtitle'],font_size*.43)
     if not boxes:return Image.new('RGBA',(1,1)),[0,0,1,1]
     # Titles may rest just outside the canvas and enter it during their vertical
@@ -376,6 +416,32 @@ def covers(g, project, frame, size, video_frames=None):
 def hidden_base(project, frame, size, video_frames=None):
     return any(covers(g,project,frame,size,video_frames) for g in project['graphics'])
 
+def text_layer(size, props=None, caption=None):
+    return title_layer(size,props) if caption is None else caption_layer(size,caption)
+
+def drawn(props):
+    """Cache key of a title's pixels: its fade and entrance timing do not change them."""
+    return json.dumps({k:v for k,v in props.items() if k not in ('opacity','enter')},sort_keys=True)
+
+@lru_cache(maxsize=128)
+def sprite(size, props_json=None, caption=None):
+    """Cached text texture and position, checked once against its full-canvas layer; None when it would not give
+    the same pixels (e.g. a blurred shadow cut by the canvas edge)."""
+    props=props_json and json.loads(props_json)
+    texture,rect=text_sprite(size,props,caption)
+    placed=Image.new('RGBA',size);placed.paste(texture,tuple(rect[:2]))
+    return (texture,rect) if placed.tobytes()==text_layer(size,props,caption).tobytes() else None
+
+def paste_text(image, size, alpha=1, props=None, caption=None):
+    texture,rect=sprite(size, props and drawn(props), caption) or (text_layer(size,props,caption),[0,0])
+    if alpha<1:
+        texture=texture.copy(); texture.putalpha(texture.getchannel('A').point(lambda a:int(a*alpha)))
+    image.alpha_composite(texture,tuple(rect[:2]))
+
+def bare(project, frame):
+    """True when nothing is painted at frame, so composite would return the base unchanged."""
+    return not any(not g.get('hidden') and g['start']<=frame<g['start']+g['length'] for g in (*project['graphics'],*project['captions']))
+
 def composite(base, project, frame, video_frames=None, size=None):
     # Painting starts at the topmost overlay that hides the canvas: what lies below it cannot show (base may then be None).
     w,h=size or base.size; sc=w/1920
@@ -393,10 +459,12 @@ def composite(base, project, frame, video_frames=None, size=None):
         p=keyframed(g.get('props',{}),g.get('keyframes',{}),local)
         if g['type']=='channel_intro':
             image=channel_intro(image,t,p); continue
-        layer=Image.new('RGBA',(w,h)); d=ImageDraw.Draw(layer)
         enter=progress(t,0,float(p.get('enter',.45)))
-        exitp=progress((g.get('motionLength',g['length'])-local)/project['fps'],0,.2)
+        exitp=exit_opacity(g,p,local,project['fps'])
         alpha=enter*exitp*float(p.get('opacity',1))
+        if g['type']=='title' and enter>=1:
+            paste_text(image,(w,h),alpha,props=p); continue
+        layer=Image.new('RGBA',(w,h)); d=ImageDraw.Draw(layer)
         x=float(p.get('x',960))*sc; y=(float(p.get('y',540))+(1-enter)*35)*sc
         title=p.get('text','Tu idea, con claridad'); accent=p.get('accent','#75b8ff')
         color=p.get('color','#ffffff')
@@ -436,6 +504,5 @@ def composite(base, project, frame, video_frames=None, size=None):
         image=layer if image is None else Image.alpha_composite(image,layer)
     for c in project['captions']:
         if c['start']<=frame<c['start']+c['length'] and not c.get('hidden'):
-            layer=caption_layer((w,h),c['text'])
-            image=Image.alpha_composite(image,layer)
+            paste_text(image,(w,h),caption=c['text'])
     return image.convert('RGB')

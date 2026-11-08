@@ -1,5 +1,8 @@
 'use strict';
 let playbackKey=null,playbackPlaying=false,playbackTicket=0;
+// The native layer sits above the page, dialogs included. It stays on screen
+// after a window plays to its end, so track it apart from playbackPlaying.
+let playbackShown=false;
 let playbackRate=1;
 const playbackRateReady=api({action:'capabilities'}).then(c=>{
  state.playbackRateSupported=!!c.playbackRate;
@@ -40,17 +43,19 @@ function playbackStatus(label,stateName=''){$('previewBadge').textContent=label;
 function cancelPreparation(job){if(state.interactivePlayback&&job?.token)void api({action:'cancelPreparation',preparation:job.token}).catch(()=>{});}
 function playbackContains(frame){return !state.playbackPlan||(frame>=(state.playbackPlan.windowStart||0)&&frame<(state.playbackPlan.windowEnd??frames()));}
 function invalidatePlayback(){
+ stopTimelineFollow();
  cancelPreparation(state.preparingPlayback);cancelPreparation(state.nextPlayback);
  state.nextPlayback=null;state.playbackPlan=null;state.queuedPlayback=null;state.continuingPlayback=false;
- playbackTicket++;state.nativeAudio=false;state.audioIds=null;state.preparingPlayback=null;playbackKey=null;playbackPlaying=false;previewRevision=-1;
+ playbackTicket++;state.nativeAudio=false;state.audioIds=null;state.preparingPlayback=null;playbackKey=null;playbackPlaying=false;playbackShown=false;previewRevision=-1;
  // Keep the native composition warm. Image-only plans can then replace their
  // lightweight overlays without rebuilding the 20-minute video timeline.
  void api({action:'playback',command:state.interactivePlayback?'invalidate':'pause'}).catch(()=>{});updatePlaybackControls();
 }
 async function pausePlayback(){
+ stopTimelineFollow();
  state.continuingPlayback=false;
- if(!playbackPlaying)return;
- playbackPlaying=false;await api({action:'playback',command:'pause'});updatePlaybackControls();
+ if(!playbackPlaying&&!playbackShown)return;
+ playbackPlaying=false;playbackShown=false;await api({action:'playback',command:'pause'});updatePlaybackControls();
 }
 window.studioPlaybackEvent=event=>{
  if(event.advanced&&state.queuedPlayback?.plan.key===event.key&&!homeVisible&&p){
@@ -67,7 +72,7 @@ window.studioPlaybackEvent=event=>{
   else{playbackStatus('No se pudo reproducir este tramo','error');toast(event.error,true);void safe(()=>seek(cursor))();}
   return;
  }
- if(event.playing||event.ended){cursor=Math.min(frames()-1,Math.max(0,event.frame));$('cursorTime').textContent=tc(cursor);$('playhead').style.left=cursor/Math.max(1,frames())*100+'%';}
+ if(event.playing||event.ended){cursor=Math.min(frames()-1,Math.max(0,event.frame));$('cursorTime').textContent=tc(cursor);$('playhead').style.left=cursor/Math.max(1,frames())*100+'%';followTimelinePlayhead();}
  if(event.ended){
   const end=state.playbackPlan?.windowEnd??frames();
   if(playbackPlaying&&end<frames()){playbackPlaying=false;state.continuingPlayback=true;updatePlaybackControls();void safe(()=>continuePlayback(end))();}
@@ -100,10 +105,10 @@ async function continuePlayback(from){
  try{
   if(!await preparePlayback(from))return;
   if(!state.continuingPlayback||ticket!==playbackTicket-1||path!==projectPath||p.revision!==revision)return;
-  cursor=from;
+  cursor=from;playbackShown=true;
   await api({action:'playback',command:'play',rect:playbackRect(),...(state.playbackRateSupported?{rate:playbackRate}:{})});
-  if(!state.continuingPlayback){await api({action:'playback',command:'pause'});return;}
-  playbackPlaying=true;state.continuingPlayback=false;$('still').hidden=true;updatePlaybackControls();
+  if(!state.continuingPlayback){playbackShown=false;await api({action:'playback',command:'pause'});return;}
+  playbackPlaying=true;state.continuingPlayback=false;$('still').hidden=true;followTimelinePlayhead();updatePlaybackControls();
  }catch(error){state.continuingPlayback=false;playbackPlaying=false;updatePlaybackControls();throw error;}
 }
 async function preparePlayback(from=cursor){
@@ -155,8 +160,9 @@ async function togglePlay(){
  if(state.feedbackOpening||$('feedbackDialog').open||state.duplicating||$('duplicateDialog').open)return;
  await api({action:'playback',command:'seek',frame:cursor});
  if(state.feedbackOpening||$('feedbackDialog').open||state.duplicating||$('duplicateDialog').open)return;
+ playbackShown=true;
  await api({action:'playback',command:'play',rect:playbackRect(),...(state.playbackRateSupported?{rate:playbackRate}:{})});
- if(state.feedbackOpening||$('feedbackDialog').open||state.duplicating||$('duplicateDialog').open){await api({action:'playback',command:'pause'});return;}
- playbackPlaying=true;$('still').hidden=true;updatePlaybackControls();
+ if(state.feedbackOpening||$('feedbackDialog').open||state.duplicating||$('duplicateDialog').open){playbackShown=false;await api({action:'playback',command:'pause'});return;}
+ playbackPlaying=true;$('still').hidden=true;followTimelinePlayhead();updatePlaybackControls();
 }
 if(typeof ResizeObserver!=='undefined')new ResizeObserver(()=>{if(playbackKey)void api({action:'playback',rect:playbackRect()}).catch(()=>{});}).observe($('viewer'));

@@ -57,6 +57,60 @@ class Mobile(unittest.TestCase):
         req.update(extra)
         return self.app.query(req)
 
+    def test_queued_request_is_processing_and_unseen_delivery_can_be_fenced(self):
+        req = self.req(action='edit',op={'type':'splitAt','frame':120})
+        self.app.mutations.acquire()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            future = pool.submit(self.app.query,req)
+            try:
+                deadline=time.monotonic()+3
+                while req['requestId'] not in self.app.active and time.monotonic()<deadline: time.sleep(.005)
+                self.assertIn(req['requestId'],self.app.active)
+                self.assertEqual(self.app.query(dict(action='receipt',requestId=req['requestId'],settle=True))['status'],'processing')
+            finally:self.app.mutations.release()
+            self.assertTrue(future.result(timeout=5)['ok'])
+        self.assertFalse(self.app.active)
+        self.assertEqual(self.app.query(dict(action='receipt',requestId=req['requestId']))['status'],'done')
+        late=self.req(action='edit',op={'type':'splitAt','frame':60})
+        before=self.path.read_bytes()
+        self.assertEqual(self.app.query(dict(action='receipt',requestId=late['requestId']))['status'],'unknown')
+        result=self.app.query(dict(action='receipt',requestId=late['requestId'],settle=True))
+        self.assertTrue(result['response']['cancelled'])
+        self.assertTrue(self.app.query(late)['cancelled'])
+        self.assertEqual(self.path.read_bytes(),before)
+        restarted=mobile.Companion(self.work/'projects',self.work/'runtime')
+        self.assertTrue(restarted.query(late)['cancelled'])
+
+    def test_duplicate_waiters_remain_visible_until_last_delivery_finishes(self):
+        req=self.req(action='edit',op={'type':'splitAt','frame':120})
+        entered=threading.Event(); release=threading.Event(); original=self.app.execute
+        def blocked(value):
+            entered.set()
+            if not release.wait(3):raise AssertionError('not released')
+            return original(value)
+        with patch.object(self.app,'execute',side_effect=blocked), concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            first=pool.submit(self.app.query,req)
+            try:
+                self.assertTrue(entered.wait(3));second=pool.submit(self.app.query,req)
+                deadline=time.monotonic()+3
+                while self.app.active.get(req['requestId'])!=2 and time.monotonic()<deadline:time.sleep(.005)
+                self.assertEqual(self.app.active[req['requestId']],2)
+            finally:release.set()
+            self.assertTrue(first.result(timeout=5)['ok']);self.assertTrue(second.result(timeout=5)['ok'])
+        self.assertEqual(mobile.project.load(self.path)['revision'],1)
+        self.assertFalse(self.app.active)
+
+    def test_ready_note_save_does_not_wait_for_media(self):
+        req=self.req(action='note',noteId='ready',frame=15,text='Original',strokes=[])
+        saved=self.app.query(req)['result']['note']
+        self.app.media.acquire()
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future=pool.submit(self.app.query,self.req(action='note',noteId='ready',version=saved['version'],frame=15,text='Actualizado',strokes=[]))
+                result=future.result(timeout=3)
+            self.assertTrue(result['ok'])
+        finally:self.app.media.release()
+
     def test_library_does_not_return_source_paths_or_feedback_snapshots(self):
         self.assertNotIn('path', self.app.query({'action':'library'})['projects'][0])
         d = self.path.parent/'feedback'/'saved'; d.mkdir(parents=True)
@@ -89,6 +143,24 @@ class Mobile(unittest.TestCase):
         self.assertTrue(self.app.query(self.req(action='undo'))['ok'])
         self.assertEqual(len(mobile.project.load(self.path)['clips']),1)
 
+    def test_restore_cut_context_from_either_edge_and_undo(self):
+        source_before = self.source.read_bytes()
+        mobile.editor.dispatch(dict(action='ops',project=str(self.path),revision=0,
+                                    ops=[dict(op='cutRange',start=120,end=135)]))
+        cut = mobile.project.load(self.path)
+        left, right = cut['clips']
+        self.assertTrue(self.edit(dict(type='resize',kind='clips',id=left['id'],edge='end',delta=15))['ok'])
+        restored = mobile.project.load(self.path)
+        self.assertEqual([(c['in'],c['length']) for c in restored['clips']],[(30,135),(165,105)])
+        self.assertEqual(mobile.project.duration(restored),240)
+        self.assertTrue(self.app.query(self.req(action='undo'))['ok'])
+        self.assertEqual(mobile.project.load(self.path)['clips'],cut['clips'])
+        self.assertTrue(self.edit(dict(type='resize',kind='clips',id=right['id'],edge='start',delta=-15))['ok'])
+        restored = mobile.project.load(self.path)
+        self.assertEqual([(c['in'],c['length']) for c in restored['clips']],[(30,120),(150,120)])
+        self.assertEqual(restored['audio'],self.original['audio'],'free music stays untouched')
+        self.assertEqual(self.source.read_bytes(),source_before)
+
     def test_duplicate_delivery_applies_cut_once_concurrently_and_after_restart(self):
         req = self.req(action='edit',op={'type':'resize','kind':'clips','id':'clip','edge':'end','delta':-30})
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as workers:
@@ -118,6 +190,25 @@ class Mobile(unittest.TestCase):
         response = self.app.query(req)
         self.assertTrue(response['conflict'])
         self.assertEqual(mobile.project.load(self.path)['graphics'][0]['props']['text'],'Mac')
+
+    def test_volume_of_an_element_and_of_a_track_as_on_the_desktop(self):
+        self.assertTrue(self.edit({'type':'volume','kind':'clips','id':'clip','percent':50})['ok'])
+        self.assertTrue(self.edit({'type':'volume','kind':'audio','id':'music','percent':0})['ok'])
+        self.assertTrue(self.edit({'type':'mixer','role':'sfx','percent':200})['ok'])
+        p = mobile.project.load(self.path)
+        self.assertAlmostEqual(p['clips'][0]['volumeDb'],-6.0206,places=3); self.assertFalse(p['clips'][0]['muted'])
+        self.assertEqual(p['audio'][0]['volumeDb'],-60)
+        self.assertAlmostEqual(p['mixer']['sfx'],6.0206,places=3)
+        before = self.path.read_bytes()
+        for op in ({'type':'volume','kind':'graphics','id':'hook','percent':50},   # a text has no sound
+                   {'type':'volume','kind':'clips','id':'clip','percent':-1}, {'type':'volume','kind':'clips','id':'clip','percent':True},
+                   {'type':'volume','kind':'clips','id':'clip','percent':'50'}, {'type':'mixer','role':'master','percent':50},
+                   {'type':'mixer','role':'music','percent':401}):
+            self.assertFalse(self.edit(op)['ok'],op)
+        self.assertEqual(self.path.read_bytes(),before)
+        self.assertTrue(mobile.public_project(p)['assets'][0]['audio'],'the phone knows which clips have sound')
+        self.assertTrue(self.app.query(self.req(action='undo'))['ok'])
+        self.assertEqual(mobile.project.load(self.path)['mixer'].get('sfx',0),0,'undo takes a volume back')
 
     def test_invalid_edits_do_not_touch_project(self):
         before = self.path.read_bytes()
@@ -372,6 +463,23 @@ class Mobile(unittest.TestCase):
             self.assertEqual((result['width'],result['height']),expected)
             self.assertFalse(result['audio'])
 
+    def test_proxy_of_a_phone_recording_held_on_its_side_is_upright(self):
+        coded=self.work/'portrait.mp4';source=self.work/'rotated.mov'
+        mobile.render.run(['-v','error','-f','lavfi','-i','testsrc2=size=90x160:rate=30:duration=2','-c:v','h264_videotoolbox','-b:v','2M','-pix_fmt','yuv420p',coded])
+        mobile.render.run(['-v','error','-display_rotation','90','-i',coded,'-c','copy',source])
+        probe=mobile.render.probe(source);self.assertEqual((probe['width'],probe['height']),(160,90))
+        asset=dict(self.original['assets'][0],path=str(source),width=160,height=90,duration=2,audio=False)
+        d=self.app.direct;name=d.resource(asset,size=1280).rsplit('/',1)[1]
+        self.assertEqual(d.jobs[name]['rotation'],90)
+        d.build(name,d.jobs[name]);built=mobile.render.probe(d.folder/name)
+        self.assertEqual((built['width'],built['height']),(160,90))
+        def frame(path,extra=()):
+            raw=mobile.render.run(['-v','error',*extra,'-i',path,'-frames:v','1','-vf','scale=160:90','-f','rawvideo','-pix_fmt','gray','-'])
+            return mobile.render.np.frombuffer(raw,dtype=mobile.render.np.uint8).astype(int)
+        upright=abs(frame(d.folder/name)-frame(source)).mean()            # FFmpeg rotates the source on its own
+        sideways=abs(frame(d.folder/name)-frame(source,('-noautorotate',))).mean()
+        self.assertLess(upright*3,sideways,'the proxy must look like the rotated source, not its coded picture')
+
     def test_direct_proxy_build_is_playable_and_small(self):
         d=self.app.direct
         url=d.resource(self.original['assets'][0]);name=url.rsplit('/',1)[1]
@@ -456,7 +564,7 @@ class Mobile(unittest.TestCase):
 
     def test_service_leaves_when_its_executable_or_code_is_replaced_but_never_during_a_write(self):
         def sleep(_):
-            if slept.call_count==2:self.app.active.add('writing')
+            if slept.call_count==2:self.app.active['writing']=1
             if slept.call_count==3:self.app.active.clear()
         with patch.object(mobile,'running',side_effect=['a','a',None,'b','b']), patch.object(mobile.os,'_exit',side_effect=SystemExit) as leave, \
              patch.object(mobile.time,'sleep',side_effect=sleep) as slept, patch.object(self.app,'prepare'):

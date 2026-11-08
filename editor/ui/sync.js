@@ -13,7 +13,7 @@ function sessionView(){return {project:homeVisible?null:path,homeFolder,revision
 let sessionTail=Promise.resolve();
 function saveSession(){if(state.booting)return Promise.resolve();const session=sessionView();const task=sessionTail.catch(()=>{}).then(()=>api({action:'sessionSave',session}));sessionTail=task;return task;}
 function restoreView(view){
- cursor=Math.max(0,Math.min(anchorFrame(p,view.anchor,view.cursor||0),Math.max(0,frames()-1)));zoom=Math.max(1,Math.min(64,view.zoom||1));selection=view.selection;
+ cursor=Math.max(0,Math.min(anchorFrame(p,view.anchor,view.cursor||0),Math.max(0,frames()-1)));zoom=Math.max(1,Math.min(timelineMaxZoom,view.zoom||1));selection=view.selection;
  if(selection&&!selected())selection=null;
  if(p.revision===view.revision){cutStart=view.cutStart??null;cutEnd=view.cutEnd??null;}
  draw();$('timelineScroll').scrollLeft=view.scroll||0;

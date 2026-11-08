@@ -3,7 +3,7 @@ const assert=require('assert'),fs=require('fs'),vm=require('vm'),path=require('p
 const elements=new Map(),requests=[],waiting=[];
 const element=id=>{if(!elements.has(id))elements.set(id,{hidden:false,style:{},dataset:{},setAttribute(){},getBoundingClientRect(){return {left:0,top:0,width:640,height:360};}});return elements.get(id);};
 const context={console,Map,Promise,Number,Math,Date,Set,Error,state:{},p:{revision:4,fps:30},path:'test.studio',cursor:0,homeVisible:false,busy:false,
- previewRevision:-1,mutationTail:Promise.resolve(),$:element,frames:()=>60,drawImageSelection(){},toast(){},tc:String,
+ previewRevision:-1,mutationTail:Promise.resolve(),$:element,frames:()=>60,drawImageSelection(){},followTimelinePlayhead(){},stopTimelineFollow(){},toast(){},tc:String,
  flushEdits:async()=>{},syncExternal:async()=>{},safe:fn=>fn,api:async request=>{
   requests.push(request);
   if(request.action==='capabilities')return {interactivePlayback:true,playbackRate:true};

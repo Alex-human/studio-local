@@ -2,7 +2,7 @@ import AppKit
 import AVFoundation
 import CoreImage
 
-private func videoNumber(_ values:[String:Any],_ key:String,_ fallback:Double)->Double {
+func videoNumber(_ values:[String:Any],_ key:String,_ fallback:Double)->Double {
     (values[key] as? NSNumber)?.doubleValue ?? fallback
 }
 
@@ -79,6 +79,8 @@ final class PlaybackVideoInstruction:NSObject,AVVideoCompositionInstructionProto
 
 /// One composition and one clock: overlays are decoded alongside the base video.
 final class PlaybackVideoCompositor:NSObject,AVVideoCompositing {
+    /// Set by the exporter: compose() then follows the FFmpeg exporter's maths where playback approximates it.
+    static var exporting=false
     var sourcePixelBufferAttributes:[String:Any]? { [kCVPixelBufferPixelFormatTypeKey as String:[kCVPixelFormatType_32BGRA]] }
     var requiredPixelBufferAttributesForRenderContext:[String:Any] { [kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32BGRA,kCVPixelBufferMetalCompatibilityKey as String:true] }
     private let queue=DispatchQueue(label:"studio.video-compositor",qos:.userInteractive)
@@ -98,23 +100,9 @@ final class PlaybackVideoCompositor:NSObject,AVVideoCompositing {
                 request.finish(with:PlaybackFailure(message:"No se pudo preparar un fotograma del vídeo."));return
             }
             let size=request.renderContext.size,rect=CGRect(origin:.zero,size:size)
-            let frame=request.compositionTime.seconds*instruction.fps
-            var result=CIImage(color:CIColor(red:0,green:0,blue:0)).cropped(to:rect)
-            for span in instruction.spans {
-                guard let source=request.sourceFrame(byTrackID:span.trackID) else {
-                    request.finish(with:PlaybackFailure(message:"No se pudo decodificar una capa de vídeo."));return
-                }
-                var image=CIImage(cvPixelBuffer:source).transformed(by:span.transform)
-                image=image.transformed(by:CGAffineTransform(translationX:-image.extent.minX,y:-image.extent.minY))
-                do {
-                    if let path=span.spec["lut"] as? String {
-                        let (size,data)=try PlaybackColorCube.table(path)
-                        image=image.applyingFilter("CIColorCube",parameters:["inputCubeDimension":size,"inputCubeData":data])
-                    }
-                    image=span.overlay ? self.overlay(image,span:span,frame:frame,fps:instruction.fps,size:size) : try self.base(image,span:span,frame:frame,size:size)
-                } catch { request.finish(with:error);return }
-                result=image.composited(over:result).cropped(to:rect)
-            }
+            var result:CIImage
+            do { result=try self.compose(instruction.spans,frame:request.compositionTime.seconds*instruction.fps,fps:instruction.fps,size:size) { request.sourceFrame(byTrackID:$0.trackID) } }
+            catch { request.finish(with:error);return }
             // The player shows these frames as BT.709 video (gamma 1.961), lighter than the paused sRGB
             // frame: encode them for that curve so playback and pause look the same.
             result=result.applyingFilter("CISRGBToneCurveToLinear").applyingFilter("CIGammaAdjust",parameters:["inputPower":1/1.961])
@@ -123,16 +111,45 @@ final class PlaybackVideoCompositor:NSObject,AVVideoCompositing {
             if expired { request.finishCancelledRequest() } else { request.finish(withComposedVideoFrame:buffer) }
         } }
     }
+    /// Base clips and video overlays of one frame, bottom to top, from each span's source picture.
+    func compose(_ spans:[PlaybackVideoSpan],frame:Double,fps:Double,size:CGSize,source:(PlaybackVideoSpan)->CVPixelBuffer?)throws->CIImage {
+        let rect=CGRect(origin:.zero,size:size)
+        var result=CIImage(color:CIColor(red:0,green:0,blue:0)).cropped(to:rect)
+        for span in spans {
+            guard let buffer=source(span) else { throw PlaybackFailure(message:"No se pudo decodificar una capa de vídeo.") }
+            var image=CIImage(cvPixelBuffer:buffer).transformed(by:span.transform)
+            image=image.transformed(by:CGAffineTransform(translationX:-image.extent.minX,y:-image.extent.minY))
+            if let path=span.spec["lut"] as? String {
+                let (size,data)=try PlaybackColorCube.table(path)
+                image=image.applyingFilter("CIColorCube",parameters:["inputCubeDimension":size,"inputCubeData":data])
+            }
+            image=span.overlay ? overlay(image,span:span,frame:frame,fps:fps,size:size) : try base(image,span:span,frame:frame,size:size)
+            result=image.composited(over:result).cropped(to:rect)
+        }
+        return result
+    }
     private func base(_ source:CIImage,span:PlaybackVideoSpan,frame:Double,size:CGSize)throws->CIImage {
         let p=span.spec,x=videoNumber(p,"x",0.5),y=videoNumber(p,"y",0.5)
         let scale=max(size.width/source.extent.width,size.height/source.extent.height)
-        var image=source.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
+        // The exporter scales the camera with Lanczos.
+        var image=Self.exporting && scale != 1 ? source.applyingFilter("CILanczosScaleTransform",parameters:[kCIInputScaleKey:scale,kCIInputAspectRatioKey:1])
+            : source.transformed(by:CGAffineTransform(scaleX:scale,y:scale))
         image=image.transformed(by:CGAffineTransform(translationX:-(image.extent.width-size.width)*x,y:-(image.extent.height-size.height)*(1-y)))
             .cropped(to:CGRect(origin:.zero,size:size))
         let color=p["color"] as? [String:Any] ?? [:]
         let exposure=videoNumber(color,"exposure",0),contrast=videoNumber(color,"contrast",1),saturation=videoNumber(color,"saturation",1)
         if exposure != 0 || contrast != 1 || saturation != 1 {
-            image=image.applyingFilter("CIColorControls",parameters:[kCIInputBrightnessKey:exposure*0.12,kCIInputContrastKey:contrast,kCIInputSaturationKey:saturation])
+            if Self.exporting {
+                // The exporter's FFmpeg `eq` (integer process_c): luma contrast/brightness, chroma scaled by saturation,
+                // on 8-bit BT.709 limited-range planes. A plane at its defaults is left untouched, as FFmpeg does.
+                let c=Int(contrast*4096),s=Int(saturation*4096)
+                let luma=contrast != 1 || exposure != 0,chroma=saturation != 1
+                guard let kernel=Self.eqKernel,let adjusted=kernel.apply(extent:image.extent,arguments:[image,Double(c),Double((Int(100*exposure*0.12+100)*511)/200-128-c/32),
+                      Double(s),Double(127-s/32),luma ? 1.0 : 0.0,chroma ? 1.0 : 0.0]) else { throw PlaybackFailure(message:"No se pudo aplicar el color del vídeo.") }
+                image=adjusted
+            } else {
+                image=image.applyingFilter("CIColorControls",parameters:[kCIInputBrightnessKey:exposure*0.12,kCIInputContrastKey:contrast,kCIInputSaturationKey:saturation])
+            }
         }
         let temperature=videoNumber(color,"temperature",0)
         if temperature != 0 {
@@ -143,7 +160,11 @@ final class PlaybackVideoCompositor:NSObject,AVVideoCompositing {
             image=adjusted
         }
         let z0=videoNumber(p,"zoom",1),z1=videoNumber(p,"zoomEnd",z0)
-        let u=min(1,max(0,(frame-Double(span.start)+videoNumber(p,"motionOffset",0))/max(1,videoNumber(p,"motionLength",Double(span.length))-1)))
+        // The exporter's FFmpeg perspective counts frames from 1 and does not clamp the curve: its zoom runs one frame
+        // ahead of playback and eases back slightly on a ramp's last frame. The export follows it exactly.
+        let phase=Self.exporting ? 1.0 : 0.0
+        let raw=(frame-Double(span.start)+videoNumber(p,"motionOffset",0)+phase)/max(1,videoNumber(p,"motionLength",Double(span.length))-1)
+        let u=Self.exporting ? raw : min(1,max(0,raw))
         let zoom=max(1,z0+(z1-z0)*u*u*(3-2*u))
         if zoom != 1 {
             image=image.transformed(by:CGAffineTransform(translationX:-(size.width-size.width/zoom)*x,y:-(size.height-size.height/zoom)*(1-y)))
@@ -151,6 +172,17 @@ final class PlaybackVideoCompositor:NSObject,AVVideoCompositing {
         }
         return image
     }
+    private static let eqKernel=CIColorKernel(source:"""
+        kernel vec4 eq(__sample s, float c, float bri, float cs, float bs, float luma, float chroma) {
+            vec3 rgb=clamp(s.rgb,0.0,1.0);
+            float y=dot(rgb,vec3(0.2126,0.7152,0.0722));
+            float Y=floor(16.0+219.0*y+0.5),U=floor(128.0+224.0*(rgb.b-y)/1.8556+0.5),V=floor(128.0+224.0*(rgb.r-y)/1.5748+0.5);
+            if (luma>0.5) Y=clamp(floor(Y*c/4096.0)+bri,0.0,255.0);
+            if (chroma>0.5) { U=clamp(floor(U*cs/4096.0)+bs,0.0,255.0); V=clamp(floor(V*cs/4096.0)+bs,0.0,255.0); }
+            float l=(Y-16.0)/219.0,cb=(U-128.0)/224.0,cr=(V-128.0)/224.0;
+            return vec4(l+1.5748*cr,l-0.1873*cb-0.4681*cr,l+1.8556*cb,s.a);
+        }
+        """)
     // FFmpeg colorbalance's shadow/midtone masks, evaluated in display RGB.
     private static let temperatureKernel=CIColorKernel(source:"""
         kernel vec4 temperature(__sample s, float amount) {
@@ -184,8 +216,19 @@ final class PlaybackVideoCompositor:NSObject,AVVideoCompositing {
         }
         let iw=max(2,(videoNumber(p,"width",760)*sc*scale).rounded(.toNearestOrEven))
         let ih=max(2,(iw*(bottom-top)/(right-left)).rounded(.toNearestOrEven))
-        image=image.transformed(by:CGAffineTransform(scaleX:iw/image.extent.width,y:ih/image.extent.height))
         let photo=(p["style"] as? String ?? "clean")=="photo",pad=photo ? max(2,(12*sc).rounded(.toNearestOrEven)) : 0
+        let angle=videoNumber(p,"rotation",0)*Double.pi/180
+        if Self.exporting && !photo && angle == 0 {
+            // As the exporter's image_layer: Lanczos resize, then a whole-pixel position.
+            if iw != image.extent.width || ih != image.extent.height {
+                let sx=iw/image.extent.width
+                image=image.applyingFilter("CILanczosScaleTransform",parameters:[kCIInputScaleKey:sx,kCIInputAspectRatioKey:ih/image.extent.height/sx]).cropped(to:CGRect(x:0,y:0,width:iw,height:ih))
+            }
+            let left=((videoNumber(p,"x",960)+dx)*sc-iw/2).rounded(.toNearestOrEven),top=((videoNumber(p,"y",540)+dy)*sc-ih/2).rounded(.toNearestOrEven)
+            image=image.transformed(by:CGAffineTransform(translationX:left,y:size.height-top-ih))
+            return image.applyingFilter("CIColorMatrix",parameters:["inputAVector":CIVector(x:0,y:0,z:0,w:max(0,min(1,alpha)))])
+        }
+        image=image.transformed(by:CGAffineTransform(scaleX:iw/image.extent.width,y:ih/image.extent.height))
         let pw=iw+2*pad,ph=ih+2*pad
         if photo {
             let mask=rounded(CGRect(x:0,y:0,width:iw,height:ih),radius:max(1,8*sc),color:CIColor(red:1,green:1,blue:1))
@@ -194,7 +237,6 @@ final class PlaybackVideoCompositor:NSObject,AVVideoCompositing {
             let panel=rounded(CGRect(x:0,y:0,width:pw,height:ph),radius:max(2,18*sc),color:CIColor(red:246/255,green:247/255,blue:250/255))
             image=image.composited(over:panel)
         }
-        let angle=videoNumber(p,"rotation",0)*Double.pi/180
         image=image.transformed(by:CGAffineTransform(translationX:-pw/2,y:-ph/2))
             .transformed(by:CGAffineTransform(rotationAngle:-angle))
         image=image.transformed(by:CGAffineTransform(translationX:(videoNumber(p,"x",960)+dx)*sc,y:size.height-(videoNumber(p,"y",540)+dy)*sc))

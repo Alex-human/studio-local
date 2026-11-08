@@ -1,6 +1,6 @@
 # Tu máquina de contenido · instalador para Mac
 
-Versión 3.0 · 20 de octubre de 2026
+Versión 3.1 · 8 de noviembre de 2026
 
 ## Empieza aquí
 
@@ -222,8 +222,8 @@ Instalar no autoriza publicar, conectar cuentas nuevas, subir material, comprar 
 | --- | --- |
 | `~/ClipsYMids/clipkit.py` | `3e00a3dfb2b4b522e853c062748f6e4841df73ff748b98dc9658b9c65a39254f` |
 | `~/ClipsYMids/CONFIGURAR.md` | `7ab96aa7e530525e517269e4012a12d470867dbfe4e8cd542bf68b94db5a9d78` |
-| `~/ClipsYMids/CORTES.md` | `d31c9b5aae9440a754f7bfbe4854028e607e3aaacea962d6d6ab63bf608bfd76` |
-| `~/ClipsYMids/STUDIO.md` | `e3a210d5f9236fedff95fb9ea9fe1d74cf595e0936924af10a68e2124d70c192` |
+| `~/ClipsYMids/CORTES.md` | `2d5da7bcf5d5e0a096ada0517af3f37c0b9df3fc47f0d4f1971abb3b1beb53f3` |
+| `~/ClipsYMids/STUDIO.md` | `91e857e6a42a84b5d70bec31776a5330252d206e94e19844d1104e5f55b62e59` |
 | `<skills>/maquina-contenido/SKILL.md` | `400a6269b3617a45fab331b6b7e88660e80a8a30029927118c70d986edf48816` |
 | `<skills>/clips-verticales/SKILL.md` | `f92b552e79e314b46d78eff7c2d4abcd29f4eefd7675d1753309f14d9fae0296` |
 | `<skills>/mids-desde-grabaciones/SKILL.md` | `57bc9d0c53aad46479386d02e0ad2c8ae56fe2b96ce4b7b5ad2d7d4711e4e49c` |
@@ -1928,8 +1928,8 @@ Método común de edición, clips y mids. El principio: la edición existe para 
 
 ## 2. Qué quitar y qué conservar
 
-- Quita muletillas, falsos arranques, retomas, repeticiones accidentales, instrucciones al editor, esperas y desvíos que no aportan.
-- Conserva afirmaciones, negaciones, condiciones, pruebas y matices. Una repetición retórica se queda solo si su énfasis aporta algo que se perdería.
+- Quita falsos arranques, retomas, repeticiones accidentales, instrucciones al editor, esperas, desvíos que no aportan y muletillas que abren o enlazan frase («pues», «o sea», «el caso es que»).
+- Conserva afirmaciones, negaciones, condiciones, pruebas, matices, enumeraciones y adverbios con sentido («obviamente», «básicamente»). Una repetición retórica se queda solo si su énfasis aporta algo que se perdería.
 - Nunca recombines frases para atribuir a alguien algo que no dijo. Mantén el orden de lo dicho.
 - Al quitar un arranque abandonado, comprueba que no te llevas el verbo que introduce lo siguiente («les dices…»). Relee siempre el montaje como frase, no solo como audio limpio.
 
@@ -1946,7 +1946,7 @@ Para cada tiempo devuelve la energía en ese punto, el mínimo cercano y el sile
 - Corta en el silencio más cercano del lado correcto de la palabra. Si en el punto hay voz (más de unos -40 dB), estás cortando una palabra o su cola.
 - Deja unos 0,08–0,12 s de aire antes de la primera palabra de cada tramo y 0,10–0,15 s después de la última. Así el empalme respira sin huecos raros.
 - Dentro de un clip, acorta a unos 0,25–0,35 s las pausas de más de 0,5 s que no tengan intención. En un mid, deja respirar más: no hay que eliminar cada pausa.
-- Si no hay silencio (habla encadenada), corta en el mínimo de energía entre palabras y compruébalo con la transcripción aislada del paso 4.
+- Si no hay silencio (habla encadenada), no quites una palabra suelta: se oye. Para el borde de un tramo mayor, corta en el mínimo de energía entre palabras y compruébalo con la transcripción aislada del paso 4.
 - Si alguien habla por altavoz o Zoom, sus colas nunca bajan a silencio total: busca el mínimo relativo, no los -45 dB.
 - clipkit añade un fundido de audio de 8 ms en cada empalme para evitar chasquidos. No hace falta más.
 
@@ -1995,7 +1995,7 @@ Pregunta: **«¿Quieres trabajar con Studio Local, el editor visual para revisar
 
 ## Instalar o reutilizar
 
-Fuente pública: [Alex-human/studio-local](https://github.com/Alex-human/studio-local). Solo Mac Apple Silicon; este paquete acompaña la actualización 1.14.4 del 14-10-2026 y las nuevas descargas usan la rama `main`. Comprueba los requisitos del repositorio que vayas a instalar. No copies el editor privado de quien distribuye este archivo, ni sus proyectos, LUT, música o credenciales.
+Fuente pública: [Alex-human/studio-local](https://github.com/Alex-human/studio-local). Solo Mac Apple Silicon; este paquete acompaña la actualización 1.15.0 del 08-11-2026, optimizada para Mac (exportación por la GPU) y las nuevas descargas usan la rama `main`. Comprueba los requisitos del repositorio que vayas a instalar. No copies el editor privado de quien distribuye este archivo, ni sus proyectos, LUT, música o credenciales.
 
 Si `instalacion.json` indica un `editor_incluido`, verifica que existen `LICENSE`, `ONBOARDING.md`, `setup.command` y `editor/engine/editor.py`: ese es el código del editor adjunto. Ofrécete a copiarlo a la carpeta elegida (`~/studio-local` por defecto) antes de instalar para que no dependa de una carpeta temporal de descargas. Si el destino ya existe, no lo sobrescribas: verifica o reutiliza su instalación.
 

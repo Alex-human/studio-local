@@ -26,6 +26,13 @@ class SyncTests(unittest.TestCase):
   self.ops(0,[dict(op='set',kind='audio',id='music',values={'volumeDb':-20})]);before=self.path.read_bytes()
   with self.assertRaises(sync.Conflict):self.ops(0,[dict(op='set',kind='audio',id='music',values={'volumeDb':-30})])
   self.assertEqual(self.path.read_bytes(),before)
+ def test_center_alignment_merges_live_text_edit_and_survives_new_lines(self):
+  self.ops(0,[dict(op='set',kind='graphics',id='g',values={'props':{'text':'Texto editado\npor el autor','x':200}})])
+  p=self.ops(0,[dict(op='set',kind='graphics',id='g',values={'props':{'text':'Título','x':200,'align':'center'}})])
+  self.assertEqual(p['graphics'][0]['props'],{'text':'Texto editado\npor el autor','x':200,'align':'center'})
+  props={**p['graphics'][0]['props'],'text':'Otro\n\nsalto de línea'}
+  p=self.ops(p['revision'],[dict(op='set',kind='graphics',id='g',values={'props':props})])
+  self.assertEqual(p['graphics'][0]['props']['align'],'center')
  def test_delete_vs_edit_conflicts(self):
   self.ops(0,[dict(op='delete',kind='graphics',id='g')])
   with self.assertRaises(sync.Conflict):self.ops(0,[dict(op='set',kind='graphics',id='g',values={'hidden':True})])

@@ -23,6 +23,7 @@ import preview
 import sync
 import feedback
 import audio_library
+import costs
 import project_library
 from PIL import Image, ImageOps
 
@@ -61,6 +62,9 @@ def import_srt(path, fps):
     return result
 
 def dispatch(req):
+    with costs.measured(req.get('action','list'),req.get('project')):return handle(req)
+
+def handle(req):
     action=req.get('action','list')
     if action=='projectFolders':return project_library.dispatch(PROJECTS,req)
     if action=='audioLibrary':return audio_library.synchronize(ROOT.parent,req.get('role','sfx'))
@@ -213,7 +217,7 @@ def dispatch(req):
             snapshot=project.excerpt(snapshot,*span)
         is_preview=bool(req.get('preview')) or span is not None
         folder=path.parent/'previews' if is_preview else EXPORTS
-        result=render.render(snapshot,folder,is_preview,label='-'.join(map(str,span)) if span else '')
+        result=render.render(snapshot,folder,is_preview,label='-'.join(map(str,span)) if span else '',gpu=True)
         result['cache']=render.maintain_cache(path.parent,snapshot.get('cacheLimitGB',5),result['path'])
         return result
     if action=='frame':
@@ -266,7 +270,9 @@ def main():
     args=parser.parse_args()
     if args.mcp: mcp(); return
     req=json.loads(Path(args.request_file).read_text() if args.request_file else (args.request or sys.stdin.read()))
-    try: print(json.dumps({'ok':True,'result':dispatch(req)},ensure_ascii=False))
+    try:
+        result=dispatch(req)
+        print(json.dumps({'ok':True,'result':result},ensure_ascii=False))
     except Exception as e:
         print(json.dumps({'ok':False,'error':str(e),'conflict':isinstance(e,sync.Conflict)},ensure_ascii=False)); sys.exit(1)
 

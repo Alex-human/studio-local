@@ -77,10 +77,12 @@ function saveFeedbackDraft(){
  });feedback.tail=task;return task;
 }
 async function flushFeedback(){if(!$('feedbackDialog').open)return;try{finishFeedbackStroke();await saveFeedbackDraft();if(feedback.error)throw feedback.error;}catch(e){feedbackFailure(e);throw e;}}
+// The CSS ratio caps the canvas width so a vertical frame fits the dialog height.
+function feedbackAspect(width,height){const style=$('feedbackCanvas').style;style.aspectRatio=width+'/'+height;style.setProperty('--feedback-ratio',String(width/height));}
 function showFeedbackCapture(note){
  const ready=note.capture==='ready'&&note.files.image;$('feedbackCaptureStatus').hidden=!!ready;
  $('feedbackCaptureStatus').textContent=note.capture==='error'?'No se pudo preparar este fotograma. Tu comentario está guardado.':'Preparando fotograma…';$('feedbackRetryCapture').hidden=note.capture!=='error';
- if(ready){$('feedbackImage').src=fileURL(note.files.image);$('feedbackImage').onload=()=>{if($('feedbackImage').naturalWidth)$('feedbackCanvas').style.aspectRatio=$('feedbackImage').naturalWidth+'/'+$('feedbackImage').naturalHeight;};}
+ if(ready){$('feedbackImage').src=fileURL(note.files.image);$('feedbackImage').onload=()=>{if($('feedbackImage').naturalWidth)feedbackAspect($('feedbackImage').naturalWidth,$('feedbackImage').naturalHeight);};}
  updateFeedbackTools();
 }
 async function captureFeedback(){
@@ -109,10 +111,10 @@ async function openFeedback(id=null){
  try{
   await flushEdits();
   if(state.preparingPlayback){invalidatePlayback();playbackStatus('Reproducción pendiente');$('renderState').textContent='';}
-  if(playbackPlaying){const frozen=await api({action:'playback',command:'freeze'});if(!Number.isInteger(frozen.frame))throw new Error('No se pudo fijar el fotograma. Pausa el vídeo y vuelve a pulsar ⌘F.');playbackPlaying=false;cursor=frozen.frame;updatePlaybackControls();}
+  if(playbackPlaying){const frozen=await api({action:'playback',command:'freeze'});if(!Number.isInteger(frozen.frame))throw new Error('No se pudo fijar el fotograma. Pausa el vídeo y vuelve a pulsar ⌘F.');playbackPlaying=false;playbackShown=false;cursor=frozen.frame;updatePlaybackControls();}
   await pausePlayback();clearTimeout(frameTimer);
   feedback.target=path;feedback.canvasWidth=p.width;feedback.canvasHeight=p.height;$('feedbackDrawing').setAttribute('viewBox','0 0 '+p.width+' '+p.height);feedback.note=null;feedback.generation=feedback.saved=0;feedback.error=null;feedback.strokes=[];feedback.stroke=null;feedback.tail=Promise.resolve();
-  $('feedbackText').value='';$('feedbackText').disabled=!!id;$('feedbackError').hidden=true;$('feedbackRetrySave').hidden=true;$('feedbackReload').hidden=true;$('feedbackRetryCapture').hidden=true;$('feedbackImage').removeAttribute('src');$('feedbackCanvas').style.aspectRatio=p.width+'/'+p.height;$('feedbackCaptureStatus').hidden=false;$('feedbackCaptureStatus').textContent='Preparando fotograma…';$('feedbackSaveState').textContent='Borrador';$('feedbackTime').textContent=feedbackTime(cursor);drawFeedbackStrokes();$('feedbackDialog').showModal();$('feedbackText').focus();
+  $('feedbackText').value='';$('feedbackText').disabled=!!id;$('feedbackError').hidden=true;$('feedbackRetrySave').hidden=true;$('feedbackReload').hidden=true;$('feedbackRetryCapture').hidden=true;$('feedbackImage').removeAttribute('src');feedbackAspect(p.width,p.height);$('feedbackCaptureStatus').hidden=false;$('feedbackCaptureStatus').textContent='Preparando fotograma…';$('feedbackSaveState').textContent='Borrador';$('feedbackTime').textContent=feedbackTime(cursor);drawFeedbackStrokes();$('feedbackDialog').showModal();$('feedbackText').focus();
   const requestId=id||('f'+Date.now().toString(36)+Math.random().toString(36).slice(2,10));
   feedback.createRequest={command:id?'get':'create',values:{id:requestId,frame:cursor,revision:p.revision}};
   await createFeedbackNote();

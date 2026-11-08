@@ -105,6 +105,13 @@ import AppKit
         near(Double(view.overlays[0].container.opacity),0.5)
         near(view.overlays[0].container.position.y,743.5)
         view.updateImages(frame:117,fps:30); near(Double(view.overlays[0].container.opacity),0.5)
+
+        var native = moving
+        native["length"] = 90; native["offset"] = 8; native["motionLength"] = 98
+        native["props"] = ["enter":0.01,"opacity":1.0,"exit":"cut"]
+        try view.configureImages([native],width:960,height:1706)
+        view.updateImages(frame:89,fps:30); near(Double(view.overlays[0].container.opacity),1)
+        view.updateImages(frame:90,fps:30); precondition(view.overlays[0].container.isHidden)
         view.clearImages(); precondition(view.overlays.isEmpty && (view.overlayRoot.sublayers ?? []).isEmpty)
         print("Native text: placement, clipping, order, opacity, motion, boundaries, cache reuse and visible failures passed")
     }

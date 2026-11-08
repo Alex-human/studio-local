@@ -28,6 +28,18 @@ def new(name='Proyecto sin título', width=1920, height=1080, fps=60000/1001):
 def duration(p):
     return sum(c['length'] for c in p['clips'])
 
+def voice_runs(clips):
+    """Clips consecutivos que siguen la fuente sin saltos (partir un clip para encuadrar, o un zoom): suenan como uno solo.
+    Cada borde de clip lleva un fundido de 3 ms contra clics, y en mitad de la voz esa muesca se oye: solo va en los cortes de verdad."""
+    runs=[]
+    for clip in clips:
+        last=runs[-1][-1] if runs else None
+        same=last is not None and all(last.get(k,d)==clip.get(k,d) for k,d in (('asset',None),('speed',1),('volumeDb',0),('muted',False)))
+        plain=last is not None and not any(c.get(k) for c in (last,clip) for k in ('fadeIn','fadeOut'))
+        if same and plain and abs(last.get('in',0)+last['length']*last.get('speed',1)-clip.get('in',0))<.01:runs[-1].append(clip)
+        else:runs.append([clip])
+    return runs
+
 def audio_gain(db):
     """The minimum fader value is digital silence, including before bus gain."""
     return 0.0 if db <= -60 else 10**(db/20)
@@ -120,7 +132,8 @@ def validate(p, check_files=False):
                 props=item.get('props',{})
                 if not isinstance(props,dict):raise ValueError('Parámetros gráficos no válidos')
                 if 'weight' in props:number(props['weight'],100,900,'Peso de texto')
-                if item['type']=='title' and props.get('style','plain') not in ('plain','instagram','sticker'):
+                if props.get('align','left') not in ('left','center','right'):raise ValueError('Alineación de texto no válida')
+                if item['type']=='title' and props.get('style','plain') not in ('plain','instagram','sticker','native'):
                     raise ValueError('Estilo de título no válido')
                 if type(props.get('box',False)) is not bool:raise ValueError('Caja del gancho no válida')
                 limits={'x':(-1920,3840),'y':(-1080,3840),'size':(8,500),'opacity':(0,1),'enter':(.01,10),'width':(1,3840),'value':(-1e9,1e9),'count':(1,5),'rotation':(-180,180),'soundDb':(-60,6),'cropLeft':(0,.98),'cropRight':(0,.98),'cropTop':(0,.98),'cropBottom':(0,.98)}
@@ -191,7 +204,8 @@ def static_title(item, fps):
     if item.get('type') != 'title' or item.get('keyframes'):return False
     first = item.get('offset', 0)
     last = first + item['length'] - 1
-    return first >= item.get('props', {}).get('enter', .45) * fps and item.get('motionLength', item['length']) - last >= .2 * fps
+    props = item.get('props', {})
+    return first >= props.get('enter', .45) * fps and (props.get('style') == 'native' or item.get('motionLength', item['length']) - last >= .2 * fps)
 
 def joined_pair(p, kind, left, right):
     """Remove one edit seam only when one flat element preserves both pieces."""

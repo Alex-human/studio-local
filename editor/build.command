@@ -17,12 +17,13 @@ bundle="$stage/Studio Local.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 /usr/bin/xcrun swiftc -swift-version 5 -O -module-cache-path "$PWD/.build/module-cache" native/Studio.swift native/Playback.swift native/VideoCompositor.swift -o "$bundle/Contents/MacOS/StudioLocal" -framework AppKit -framework WebKit -framework AVFoundation -framework MediaToolbox -framework CoreImage
 /usr/bin/xcrun swiftc -swift-version 5 -parse-as-library -O -module-cache-path "$PWD/.build/module-cache" native/Probe.swift -o "$stage/probe" -framework AVFoundation
+/usr/bin/xcrun swiftc -swift-version 5 -parse-as-library -O -module-cache-path "$PWD/.build/module-cache" native/Playback.swift native/VideoCompositor.swift native/Export.swift -o "$stage/studio-export" -framework AppKit -framework AVFoundation -framework MediaToolbox -framework CoreImage
 printf '%s' "$PWD" > "$bundle/Contents/Resources/root.txt"
 cp assets/app-icon/StudioIcon.icns "$bundle/Contents/Resources/StudioIcon.icns"
 /usr/bin/python3 - "$bundle/Contents/Info.plist" "${STUDIO_APP_ID:-local.studiolocal.app}" "${STUDIO_APP_NAME:-Studio Local}" <<'PY'
 import plistlib,sys
 with open(sys.argv[1],'wb') as f:
-    plistlib.dump(dict(CFBundleExecutable='StudioLocal',CFBundleIdentifier=sys.argv[2],CFBundleName=sys.argv[3],CFBundleIconFile='StudioIcon.icns',CFBundlePackageType='APPL',CFBundleVersion='26',CFBundleShortVersionString='1.14.4',NSHighResolutionCapable=True),f)
+    plistlib.dump(dict(CFBundleExecutable='StudioLocal',CFBundleIdentifier=sys.argv[2],CFBundleName=sys.argv[3],CFBundleIconFile='StudioIcon.icns',CFBundlePackageType='APPL',CFBundleVersion='27',CFBundleShortVersionString='1.15.0',NSHighResolutionCapable=True),f)
 PY
 /usr/bin/codesign --force --sign - "$bundle"
 /usr/bin/codesign --verify --deep --strict "$bundle"

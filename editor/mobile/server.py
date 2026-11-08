@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Loopback companion for Studio. Remote access is exclusively through an approved Serve proxy."""
 import argparse
+from collections import Counter
 import copy
 import gzip
 import hashlib
@@ -55,9 +56,16 @@ def integer(value, low=0, high=100_000_000):
     return value
 
 
+def percent_db(value):
+    """Percentage of the original sound (100 = unchanged, 0 = silent) in dB, as the desktop volume control does."""
+    if type(value) not in (int, float) or not 0 <= value <= 400:
+        raise ValueError('Volumen no válido')
+    return -60 if value <= 0 else max(-59.999, 20 * math.log10(value / 100))
+
+
 def public_project(p):
     result = copy.deepcopy(p)
-    result['assets'] = [{k: v for k, v in a.items() if k in ('id', 'name', 'kind', 'duration', 'width', 'height')}
+    result['assets'] = [{k: v for k, v in a.items() if k in ('id', 'name', 'kind', 'duration', 'width', 'height', 'audio')}
                         for a in p['assets']]
     return result
 
@@ -79,7 +87,8 @@ class Companion:
         self.warm_lock = threading.Lock()
         self.warm_jobs = []
         self.warming = False
-        self.active = set()
+        self.activity = threading.Lock()
+        self.active = Counter()
         self.planned = {}
         with self.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, digest TEXT, result TEXT)')
@@ -157,10 +166,18 @@ class Companion:
         if action == 'clientLog':
             return self.client_log(req['entries'])
         if action == 'receipt':
-            with self.db() as db:
-                row = db.execute('SELECT result FROM requests WHERE id=?', (identifier(req['requestId']),)).fetchone()
-            return {'status': 'processing' if req['requestId'] in self.active else 'unknown' if row is None else 'pending' if row[0] is None else 'done',
-                    'response': json.loads(row[0]) if row and row[0] else None}
+            rid = identifier(req['requestId'])
+            with self.activity, self.db() as db:
+                if rid in self.active:
+                    return {'status': 'processing', 'response': None}
+                row = db.execute('SELECT result FROM requests WHERE id=?', (rid,)).fetchone()
+                if row is None and req.get('settle') is True:
+                    # Fence an unseen delivery: if it arrives later, this ID can never execute.
+                    result = json.dumps({'ok': False, 'cancelled': True, 'error': 'La acción no llegó a guardarse. Tu borrador se conserva.'})
+                    db.execute('INSERT INTO requests VALUES(?,?,?)', (rid, '', result))
+                    row = (result,)
+                return {'status': 'unknown' if row is None else 'pending' if row[0] is None else 'done',
+                        'response': json.loads(row[0]) if row and row[0] else None}
         return self.mutate(req)
 
     def prepare(self, catalog):
@@ -191,37 +208,43 @@ class Companion:
             # macOS stops letting a process read Documents once the file it runs from is replaced, as a Codex update
             # does, and an engine changed on the Mac writes montages the one loaded here rejects, which fails the
             # whole library: leaving lets launchd start the service again from the new ones. Never in the middle of a write.
-            if running() not in (None, started) and not self.active:
-                os._exit(0)
+            with self.activity:
+                if running() not in (None, started) and not self.active:
+                    os._exit(0)
             time.sleep(20)
 
     def mutate(self, req):
         rid = identifier(req.get('requestId'))
         digest = hashlib.sha256(json.dumps(req, sort_keys=True).encode()).hexdigest()
-        # Persist intent before the canonical write. An interrupted write is never replayed.
-        with self.mutations:
-            with self.db() as db:
-                row = db.execute('SELECT digest,result FROM requests WHERE id=?', (rid,)).fetchone()
-                if row:
-                    if row[0] != digest:
-                        raise ValueError('La petición ya corresponde a otra acción')
-                    if row[1] is None:
-                        return {'ok': False, 'uncertain': True, 'error': 'Comprueba el resultado en el proyecto antes de hacer otro cambio.'}
-                    return json.loads(row[1])
-                db.execute('INSERT INTO requests VALUES(?,?,NULL)', (rid, digest))
-            self.active.add(rid)
-            try:
-                result = {'ok': True, 'result': self.execute(req)}
-            except sync.Conflict as exc:
-                result = {'ok': False, 'conflict': True, 'error': str(exc)}
-            except (ValueError, KeyError, TypeError) as exc:
-                result = {'ok': False, 'error': str(exc) if isinstance(exc, ValueError) else 'Petición incompleta'}
-            finally:
-                self.active.discard(rid)
-            # Unexpected I/O errors deliberately leave the receipt pending.
-            with self.db() as db:
-                db.execute('UPDATE requests SET result=? WHERE id=?', (json.dumps(result), rid))
-            return result
+        # Register before waiting, and retain visibility until the receipt is durable.
+        with self.activity:
+            self.active[rid] += 1
+        try:
+            with self.mutations:
+                with self.db() as db:
+                    row = db.execute('SELECT digest,result FROM requests WHERE id=?', (rid,)).fetchone()
+                    if row:
+                        if row[0] and row[0] != digest:
+                            raise ValueError('La petición ya corresponde a otra acción')
+                        if row[1] is None:
+                            return {'ok': False, 'uncertain': True, 'error': 'Comprueba el resultado en el proyecto antes de hacer otro cambio.'}
+                        return json.loads(row[1])
+                    db.execute('INSERT INTO requests VALUES(?,?,NULL)', (rid, digest))
+                try:
+                    result = {'ok': True, 'result': self.execute(req)}
+                except sync.Conflict as exc:
+                    result = {'ok': False, 'conflict': True, 'error': str(exc)}
+                except (ValueError, KeyError, TypeError) as exc:
+                    result = {'ok': False, 'error': str(exc) if isinstance(exc, ValueError) else 'Petición incompleta'}
+                # Unexpected I/O errors deliberately leave the receipt pending; never replay it.
+                with self.db() as db:
+                    db.execute('UPDATE requests SET result=? WHERE id=?', (json.dumps(result), rid))
+                return result
+        finally:
+            with self.activity:
+                self.active[rid] -= 1
+                if not self.active[rid]:
+                    del self.active[rid]
 
     def execute(self, req):
         path, p = self.read(req['project'])
@@ -247,8 +270,14 @@ class Companion:
                 note = editor.dispatch(dict(base, action='feedback', command='update', id=nid, version=1,
                                             values={'text': text, 'strokes': strokes, 'status': 'draft'}))
                 version = note['version']
-            with self.media:
-                editor.dispatch(dict(base, action='feedback', command='capture', id=nid))
+            saved = editor.dispatch(dict(base, action='feedback', command='get', id=nid))
+            if saved['capture'] != 'ready' or 'image' not in saved['files']:
+                if not self.media.acquire(timeout=15):
+                    raise ValueError('El Mac sigue preparando medios. Tu borrador se conserva; vuelve a intentarlo en unos instantes.')
+                try:
+                    editor.dispatch(dict(base, action='feedback', command='capture', id=nid))
+                finally:
+                    self.media.release()
             values = dict(text=text, strokes=strokes, status='open')
             note = editor.dispatch(dict(base, action='feedback', command='update', id=nid,
                                          version=integer(version, 1), values=values))
@@ -267,6 +296,10 @@ class Companion:
                 operation = dict(op='linkTrack', track=op['track'], linked=op['linked'])
             elif mode == 'splitAt':
                 operation = dict(op='splitAt', frame=integer(op['frame'], 1))
+            elif mode == 'mixer':
+                if op.get('role') not in ('voice', 'music', 'sfx'):
+                    raise ValueError('Pista no válida')
+                operation = dict(op='mixer', values={op['role']: percent_db(op.get('percent'))})
             else:
                 kind, iid = op.get('kind'), identifier(op.get('id'))
                 if kind not in ('clips', 'audio', 'graphics', 'captions'):
@@ -290,6 +323,15 @@ class Companion:
                     if type(op.get('linked')) is not bool:
                         raise ValueError('Vínculo no válido')
                     operation.update(op='set', values={'linked': op['linked']})
+                elif mode == 'volume':
+                    db = percent_db(op.get('percent'))
+                    if kind == 'audio' or (kind == 'clips' or item.get('type') == 'video') and next((a for a in viewed['assets'] if a['id'] == item.get('asset')), {}).get('audio'):
+                        values = {'volumeDb': db, 'muted': False}
+                    elif item.get('type') == 'image' and item['props'].get('sound') and item['props'].get('animation') != 'none':
+                        values = {'props': {**item['props'], 'soundDb': min(db, 6)}}
+                    else:
+                        raise ValueError('Este elemento no tiene sonido')
+                    operation.update(op='set', values=values)
                 elif mode == 'resize':
                     operation.update(op='resizeEdge', edge=op.get('edge'), delta=integer(op.get('delta'), -100_000_000))
                 elif mode == 'split':

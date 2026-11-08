@@ -1,5 +1,5 @@
 """Frame-anchored local review notes. Separate from the editable/rendered project."""
-import copy,json,math,re,sqlite3,time,uuid
+import copy,json,math,re,shutil,sqlite3,time,uuid
 from contextlib import contextmanager
 from pathlib import Path
 from PIL import Image,ImageDraw
@@ -69,6 +69,11 @@ def save_png(image,path):
     temp=path.with_name('.'+uuid.uuid4().hex+'.png');image.save(temp);temp.replace(path)
 def annotate(folder,strokes):
     if not (folder/'frame.png').exists():return
+    if not strokes:
+        temp=folder/('.'+uuid.uuid4().hex+'.png')
+        try:shutil.copyfile(folder/'frame.png',temp);temp.replace(folder/'annotated.png')
+        finally:temp.unlink(missing_ok=True)
+        return
     with Image.open(folder/'frame.png') as original:
         w,h=original.size;im=original.convert('RGB').resize((w*2,h*2));draw=ImageDraw.Draw(im)
     for s in strokes:
@@ -110,7 +115,7 @@ def dispatch(path,p,req):
         if note['capture']=='ready' and (folder/'frame.png').exists():return describe(path,p,note)
         snapshot=project.load(folder/'snapshot.studio')
         try:
-            result=render.frame(snapshot,note['frame'],folder,width=min(snapshot['width'],1920))
+            result=render.frame(snapshot,note['frame'],folder,width=min(snapshot['width'],1920),timeout=30)
             with Image.open(result['path']) as im:save_png(im.convert('RGB'),folder/'frame.png')
             with database(path,True) as db:
                 note=get(db,id,p['id']);annotate(folder,note['strokes']);note['capture']='ready';put(db,note)
@@ -132,9 +137,10 @@ def dispatch(path,p,req):
         if 'strokes' in values:strokes_checked(values['strokes'])
         if 'status' in values and values['status'] not in STATES:raise ValueError('Estado no válido')
         if 'appliedRevision' in values:project.number(values['appliedRevision'],0,p['revision'],'revisión aplicada')
+        redraw='strokes' in values and (values['strokes']!=note['strokes'] or not (folder/'annotated.png').exists())
         note.update(values)
         if note['status'] in ('open','resolved') and (not note['text'].strip() and not note['strokes']):raise ValueError('Escribe un comentario o dibuja una indicación')
         if note['status'] in ('open','resolved') and note['capture']!='ready':raise ValueError('Espera a que esté lista la captura antes de guardar')
-        if 'strokes' in values:annotate(folder,note['strokes'])
+        if redraw:annotate(folder,note['strokes'])
         note['version']+=1;note['updatedAt']=time.time();put(db,note)
     return describe(path,p,note)

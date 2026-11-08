@@ -65,6 +65,20 @@ class InstagramHookTests(unittest.TestCase):
         for props in (props,{**props,'size':160,'y':1000}):  # the second lands outline vertices on subsample boundaries
             sprite,rect=graphics.text_sprite(size,props);actual=Image.new('RGBA',size);actual.alpha_composite(sprite,tuple(rect[:2]))
             np.testing.assert_array_equal(np.asarray(graphics.title_layer(size,props)),np.asarray(actual))
+    def test_native_hook_cards_all_lines_and_matches_native_sprite(self):
+        size=(1080,1920);props=dict(text='Instagram, reúne a todos \nlos infoproductores de España:',style='native',x=960,y=460,size=114,color='#000000',accent='#ffffff')
+        p=copy.deepcopy(self.p);p['graphics'][0]['props']=props;project.validate(p)
+        _,rows,card,_=graphics.native_hook_parts(props['text'],540,460*1080/1920,114*1080/1920,1080*.9)
+        self.assertEqual(' '.join(line for line,_ in rows),' '.join(props['text'].split()))  # overflowing breaks are rebalanced
+        self.assertLessEqual(card[2]-card[0],1080*.9)
+        layer=np.asarray(graphics.title_layer(size,props))
+        card_px=np.argwhere((layer[:,:,3]==255)&(layer[:,:,:3].min(2)==255));ink=np.argwhere((layer[:,:,3]==255)&(layer[:,:,:3].max(2)==0))
+        self.assertGreater(len(ink),5000)
+        for axis in (0,1):
+            self.assertLess(card_px[:,axis].min(),ink[:,axis].min());self.assertGreater(card_px[:,axis].max(),ink[:,axis].max())
+        for props in (props,{**props,'text':'Escribe aquí\ntu gancho','color':'#ffffff','accent':'#000000','y':1003}):
+            sprite,rect=graphics.text_sprite(size,props);actual=Image.new('RGBA',size);actual.alpha_composite(sprite,tuple(rect[:2]))
+            np.testing.assert_array_equal(np.asarray(graphics.title_layer(size,props)),np.asarray(actual))
     def test_weight_and_style_validation(self):
         for values in [{'weight':999},{'style':'unknown'},{'box':'sí'}]:
             p=copy.deepcopy(self.p);p['graphics'][0]['props'].update(values)

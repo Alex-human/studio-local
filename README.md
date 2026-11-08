@@ -22,7 +22,7 @@ Requisitos: un Mac con chip Apple (M1 o posterior), conexión a internet durante
 - Imágenes pegadas desde el portapapeles, superposición de vídeo, títulos animados y subtítulos.
 - Volumen por pista y por elemento, fundidos y reducción de música mientras hablas.
 - Comentarios sobre el fotograma (⌘F) que Claude puede leer y aplicar.
-- Exportación en H.264 a `~/Movies/Studio Local`.
+- Exportación en H.264 a `~/Movies/Studio Local`, codificada por la GPU del Mac (VideoToolbox) para que no se caliente; si algo no está cubierto, vuelve sola al render por software.
 - CLI y servidor MCP para que Claude edite los mismos proyectos mientras tú miras.
 - Interfaz opcional para el iPhone.
 

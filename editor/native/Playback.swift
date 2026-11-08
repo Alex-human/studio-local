@@ -402,7 +402,7 @@ final class PlaybackView: NSView {
                 let pixelScale = video.width/number(s,"canvasWidth",960)
                 let animated = props["animation"] as? String != "none"
                 let entrance = animated ? playbackSmooth(local/fps/max(0.01,number(props,"enter",0.45))) : 1
-                let exit = animated ? playbackSmooth((number(s,"motionLength",Double(length))-local)/fps/0.2) : 1
+                let exit = animated && props["exit"] as? String != "cut" ? playbackSmooth((number(s,"motionLength",Double(length))-local)/fps/0.2) : 1
                 // Pillow places the canonical glyphs on the preview pixel grid.
                 // Keep the cached raster sharp during the same vertical entry.
                 let dy = animated ? ((1-entrance)*35*number(s,"canvasWidth",960)/1920).rounded() : 0

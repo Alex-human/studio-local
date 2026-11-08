@@ -14,3 +14,6 @@ editor/projects/
 editor/assets/luts/*.cube
 assets/audio/*
 !assets/audio/README.md
+
+# Registro local de tiempos y CPU
+editor/costes.jsonl

@@ -171,5 +171,12 @@ vm.runInContext(code+'\nObject.assign(this,{DirectPlayer,Media,Reader,sampleTabl
  assert.equal(tap(25,45),'hook');assert.equal(tap(5,45),'under');assert.equal(tap(-10,45),undefined,'the bars beside the picture are not it');
  p.frame=45;assert.equal(tap(25,45),'under','a text that is no longer on screen is not tapped');
  assert.equal(cropped.length,0,'a video frame is drawn whole and placed: WebKit ignores its source rectangle, so a zoomed clip showed with no zoom');
+ // A native hook keeps its configured opacity through the last frame, then the whole card vanishes.
+ const hook={id:'native',kind:'text',start:0,length:90,offset:8,motionLength:98,url:'/hook.png',rect:[20,40,120,60],props:{enter:.01,opacity:1,exit:'cut'}};
+ p.plan={fps:30,width:160,height:320,clips:[],layers:[hook]};p.images.set('/hook.png',{image:{naturalWidth:120}});
+ p.frame=89;p.draw();assert.equal(p.ctx.globalAlpha,1);
+ hook.props.exit=undefined;p.draw();assert.ok(p.ctx.globalAlpha<.08,'plain titles keep their exit');
+ hook.props.exit='cut';hook.props.opacity=.4;p.draw();assert.equal(p.ctx.globalAlpha,.4,'explicit opacity stays editable');
+ const count=drawn.length;p.frame=90;p.draw();assert.equal(drawn.length,count,'nothing from the title is drawn after its boundary');
  console.log('PASS · direct player: proxy index, a tap on a text, download from the middle, decoding, seeks, cuts, waits, read-ahead, sound, fallback');
 })().catch(e=>{console.error(e);process.exitCode=1});

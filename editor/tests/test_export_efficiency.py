@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -43,12 +44,17 @@ class HiddenBaseShortcut(unittest.TestCase):
         with patch.dict(render.ENCODER,{'master':['-c:v','libx264','-preset','ultrafast','-qp','0']}):
             if shortcut:out=render.render(self.p,folder,with_audio=False)
             else:
-                with patch.object(graphics,'covers',return_value=False):out=render.render(self.p,folder,with_audio=False)
+                with patch.object(graphics,'covers',return_value=False),patch.object(graphics,'bare',return_value=False):
+                    out=render.render(self.p,folder,with_audio=False)
         raw=render.run(['-v','error','-i',out['path'],'-f','rawvideo','-pix_fmt','rgb24','-'])
         return np.frombuffer(raw,np.uint8).reshape(-1,90,160,3)
     def test_export_is_identical(self):
         fast,slow=self.frames('fast',True),self.frames('slow',False)
         self.assertEqual(len(fast),120);np.testing.assert_array_equal(fast,slow)
+    def test_bare_frames_skip_the_painter(self):
+        with patch.object(graphics,'composite',wraps=graphics.composite) as painter:self.frames('spy',True)
+        painted=[f for f in range(120) if not graphics.bare(self.p,f)]
+        self.assertTrue(0<len(painted)<120);self.assertEqual(painter.call_count,len(painted))
     def test_single_frame_is_identical(self):
         for n in (45,52,80):
             a=render.frame(self.p,n,self.root/'fa',width=160)
@@ -59,5 +65,21 @@ class HiddenBaseShortcut(unittest.TestCase):
         a=render.frame(p,80,self.root/'ta',width=160)
         with patch.object(graphics,'covers',return_value=False):b=render.frame(p,80,self.root/'tb',width=160)
         with Image.open(a['path']) as x,Image.open(b['path']) as y:np.testing.assert_array_equal(np.asarray(x),np.asarray(y))
+
+class TextTextures(unittest.TestCase):
+    def test_textures_match_full_canvas_layers(self):
+        styles=[{'text':'Hola\nmundo','subtitle':'Sub'},{'style':'instagram','text':'Escribe aquí\ntu gancho','box':True},
+                {'style':'sticker','text':'Uno dos\ntres'},{'text':'Borde','x':-40,'y':10},{'text':'Centro','align':'center','x':1900,'y':1070}]
+        p=project.new(width=320,height=180,fps=30)
+        p['graphics']=[dict(id=f't{i}',type='title',start=0,length=60,motionLength=50,props=dict(enter=.3,**style)) for i,style in enumerate(styles)]
+        p['captions']=[dict(id='c',text='Dos líneas\nde subtítulo',start=5,length=40)]
+        p=project.validate(p)
+        self.assertEqual([graphics.sprite((320,180),json.dumps(g['props'],sort_keys=True)) is not None for g in p['graphics']],[True,True,True,False,False])   # the last two cross the edge
+        rng=np.random.default_rng(3)
+        for f in (5,12,47,55):
+            base=Image.fromarray(rng.integers(0,255,(180,320,3),dtype=np.uint8))
+            fast=graphics.composite(base,p,f)
+            with patch.object(graphics,'sprite',lambda *_:None):slow=graphics.composite(base,p,f)
+            np.testing.assert_array_equal(np.asarray(fast),np.asarray(slow),err_msg=f'frame {f}')
 
 if __name__=='__main__':unittest.main()

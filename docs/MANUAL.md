@@ -170,6 +170,14 @@ Los archivos externos elegidos desde estos dos botones se copian a la biblioteca
 
 CLI: `{"action":"audioLibrary","role":"sfx"}` o `"music"` devuelve la carpeta actualizada sin modificar un proyecto. Un `import` con `libraryRole:"sfx"` o `"music"` conserva el audio en la biblioteca y lo inserta con ese rol. Las revisiones y el historial siguen aplicándose.
 
+## Actualización 1.15.0 · optimizada para Mac
+
+- **Exportar por la GPU del Mac.** `build.command` compila `runtime/studio-export` (AVFoundation y VideoToolbox): el máster se codifica en hardware y el Mac se calienta mucho menos. Si un montaje no está cubierto o el exportador falla, Studio vuelve solo al render de Python.
+- **Menos CPU al preparar y exportar.** La preparación de medios usa VideoToolbox; los fotogramas sin nada encima no se vuelven a pintar y los textos reutilizan su textura (−72 % de CPU en un clip vertical, con el mismo resultado).
+- **Registro de costes.** Cada acción anota su duración y CPU en `editor/costes.jsonl` (solo local, fuera de Git) para detectar qué calienta el Mac.
+- **Subtítulos editables más fiables.** Al cambiar una palabra, el bloque se recoloca a su propia altura, no a la del preset.
+- Revisión: notas que ya no quedan tapadas por el vídeo nativo, interfaz móvil más estable al alargar clips y hacer zoom, y volver a la biblioteca conserva la carpeta.
+
 ## Actualización 1.14.4
 
 - Gancho **Sticker de Instagram** (`style:"sticker"`): letra condensada blanca y una tarjeta negra por línea, con Barlow Condensed incluida bajo OFL. Mantiene el texto editable.

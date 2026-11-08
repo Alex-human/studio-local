@@ -11,6 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from PIL import Image, ImageOps
 import numpy as np
+import costs
 import graphics
 import project
 import sounds
@@ -30,13 +31,15 @@ def stop(proc):
             try:pipe.close()
             except (BrokenPipeError,OSError):pass
 
-def run(args):
+def run(args, timeout=None):
     proc = subprocess.Popen([str(FF), '-hide_banner', '-nostdin', *map(str,args)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
-        out, err = proc.communicate()
+        out, err = proc.communicate(timeout=timeout)
         if proc.returncode:
             raise ValueError('El motor de vídeo no pudo completar la operación: '+err.decode(errors='replace')[-1800:])
         return out
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError('La captura ha tardado demasiado. El borrador se conserva; vuelve a intentarlo cuando el Mac termine de preparar medios.') from exc
     finally:
         stop(proc)
 
@@ -185,7 +188,7 @@ def overlay_filter(item, p, first=0, last=None, lut=None):
     pts=f'if(eq(N\\,0)\\,min({pts}\\,({first}-0.5)/({rate(p)})/TB)\\,{pts})'
     return ','.join([f'settb=1/1000000000,setpts={pts},fps={rate(p)}:round=up,trim=start_pts={first}:end_pts={end},setsar=1',*lut_filter(lut)])
 
-def overlay_frame(p, item, frame, folder):
+def overlay_frame(p, item, frame, folder, timeout=None):
     """Cache source pixels only; editing position, crop or text never invalidates the decode."""
     asset=next(a for a in p['assets'] if a['id']==item['asset'])
     local=frame-item['start'];nearby={**item,'in':item.get('in',0)+local*item.get('speed',1)}
@@ -194,7 +197,7 @@ def overlay_frame(p, item, frame, folder):
     key=hashlib.sha256(json.dumps(['overlay',str(source.resolve()),stat.st_size,stat.st_mtime_ns,args]).encode()).hexdigest()[:28]
     cached=Path(folder)/f'source-{key}.png'
     if not cached.exists():
-        raw=run(args)
+        raw=run(args,timeout=timeout)
         if not raw:raise ValueError('No se pudo leer el vídeo superpuesto: '+asset['name'])
         with tempfile.NamedTemporaryFile(prefix='.source-',suffix='.png',dir=folder,delete=False) as temp:
             temp.write(raw);tmp=Path(temp.name)
@@ -240,14 +243,14 @@ def atempo(speed):
 def audio_specs(p, work, image_sounds=True):
     total=project.duration(p)/p['fps']; assets={a['id']:a for a in p['assets']}
     specs=[]; offset=0
-    for c in p['clips']:
-        a=assets[c['asset']]
+    for run in project.voice_runs(p['clips']):
+        c=run[0];a=assets[c['asset']];length=sum(x['length'] for x in run)
         if a['audio'] and not c.get('muted'):
             specs.append(dict(path=a['path'],start=offset/p['fps'],source=c.get('in',0)/p['fps'],
-                              length=c['length']/p['fps'],role='voice',db=c.get('volumeDb',0),speed=c.get('speed',1),
+                              length=length/p['fps'],role='voice',db=c.get('volumeDb',0),speed=c.get('speed',1),
                               fadeIn=c.get('fadeIn',0)/p['fps'],fadeOut=c.get('fadeOut',0)/p['fps'],
-                              fadeOffset=c.get('fadeOffset',0)/p['fps'],fadeLength=c.get('fadeLength',c['length'])/p['fps']))
-        offset+=c['length']
+                              fadeOffset=c.get('fadeOffset',0)/p['fps'],fadeLength=c.get('fadeLength',length)/p['fps']))
+        offset+=length
     for c in [*p['audio'],*(g for g in p['graphics'] if g.get('type')=='video')]:
         if not assets[c['asset']].get('audio') or c.get('hidden') or c.get('muted') or c['start']>=project.duration(p): continue
         specs.append(dict(path=assets[c['asset']]['path'],start=c['start']/p['fps'],source=c.get('in',0)/p['fps'],
@@ -319,23 +322,127 @@ def render_audio(p, work, image_sounds=True):
 def progress_file(work, state, current=0, total=0):
     project.atomic_json(work.parent/'status.json',dict(state=state,frame=current,total=total))
 
-# VideoToolbox: quality 75 beats x264 medium crf 16 against a lossless reference (51.9 vs 51.2 dB) with half the energy.
-ENCODER={'preview':['-c:v','h264_videotoolbox','-q:v','60'],'master':['-c:v','h264_videotoolbox','-q:v','75']}
+# VideoToolbox quality 88: ~64 Mb/s on 4K59.94 camera footage, inside YouTube's 53–68 Mb/s for 4K60.
+QUALITY={'preview':60,'master':88}
+ENCODER={kind:['-c:v','h264_videotoolbox','-q:v',str(value)] for kind,value in QUALITY.items()}
 
-LIMITER='alimiter=limit=0.87:attack=5:release=60:level=disabled:latency=1'
+# Limits true peaks: at 48 kHz it would only see the samples, and peaks between them reached +1.8 dBTP. 0.84 keeps them under −1 dBTP after AAC.
+LIMITER='aresample=192000,alimiter=limit=0.84:attack=5:release=60:level=disabled:latency=1,aresample=48000'
 
 def loudness(path, chain=''):
     report=subprocess.run([str(FF),'-hide_banner','-nostdin','-i',str(path),'-af',chain+'ebur128','-f','null','-'],capture_output=True,text=True).stderr
     return float(re.findall(r'I:\s+(-?[\d.]+) LUFS',report)[-1])
 
 def master_level(mix):
-    """Masters play at −14 LUFS integrated, YouTube's level, with effect peaks limited."""
+    """Masters play at −14 LUFS integrated, YouTube's level, with true peaks limited."""
     level=loudness(mix)
     gain=0 if level<=-70 else -14-level   # silence stays silent
     if gain:gain+=-14-loudness(mix,f'volume={gain:.2f}dB,{LIMITER},')   # the limiter shaves loud effects: one correction
     return ['-af',f'volume={gain:.2f}dB,{LIMITER}']
 
-def render(p, folder, preview=False, with_audio=True, label=''):
+EXPORTER=ROOT/'runtime/studio-export'
+
+def export_plan(p, folder, w=None, h=None):
+    """Plan for the GPU exporter at the output size: base clips and video overlays for the playback compositor; titles, captions and
+    images as this module's own sprites, placed per frame. None when a stretch needs paint()."""
+    import preview   # preview imports render
+    w,h=w or p['width'],h or p['height'];total=project.duration(p);fps=p['fps']
+    if any(not g.get('hidden') and g['type'] not in ('title','image','video') for g in p['graphics']):return None
+    clips=[]
+    for region in preview.regions({**p,'_nativeRetime':True},True,True,True,True):
+        if region['cached']:return None
+        clip=region['clip'];spec=dict(path=region['path'],sourceIn=region['sourceIn'],length=region['end']-region['start'],start=region['start'],**preview.lut_spec(region))
+        spec.update({k:clip[k] for k in ('speed','zoom','zoomEnd','x','y','color','motionOffset','motionLength') if k in clip},**({'retime':True} if region['retime'] else {}))
+        clips.append(spec)
+    sprites,index,placements=[],{},[[] for _ in range(total)]
+    def cropped(layer):
+        box=layer.getbbox();return box and (layer.crop(box),box)
+    def place(f,key,make,alpha):
+        if key not in index:
+            made=make();index[key]=None
+            if made:
+                image,rect=made;path=folder/f'sprite-{len(sprites)}.png';image.save(path);sprites.append(str(path));index[key]=(len(sprites)-1,rect[0],rect[1])
+        if index[key] and alpha>0:placements[f]+=[*index[key],round(alpha,6)]
+    layers=[g for g in p['graphics'] if not g.get('hidden') and g['type']!='video']+[dict(c,type='caption') for c in p['captions'] if not c.get('hidden')]
+    for g in layers:
+        for f in range(max(0,g['start']),min(total,g['start']+g['length'])):
+            local=f-g['start']+g.get('offset',0);t=local/fps;props=graphics.keyframed(g.get('props',{}),g.get('keyframes',{}),local)
+            exitp=graphics.exit_opacity(g,props,local,fps)
+            if g['type']=='caption':place(f,('c',g['text']),lambda:graphics.sprite((w,h),None,g['text']) or cropped(graphics.caption_layer((w,h),g['text'])),1)
+            elif g['type']=='title':
+                enter=graphics.progress(t,0,float(props.get('enter',.45)));style=graphics.drawn(props)
+                make=(lambda:graphics.sprite((w,h),style) or cropped(graphics.title_layer((w,h),props))) if enter>=1 else (lambda:cropped(graphics.title_layer((w,h),props,enter)))
+                place(f,('t',style,enter),make,enter*exitp*float(props.get('opacity',1)))
+            else:
+                moving=props.get('animation','pop')!='none' and t<float(props.get('enter',.48))
+                place(f,('i',json.dumps(props,sort_keys=True),t if moving else None),lambda:cropped(graphics.image_layer((w,h),p,props,t)),exitp*float(props.get('opacity',1)))
+    rate_=Fraction(fps).limit_denominator(1001)
+    return dict(frames=total,width=w,height=h,fpsNum=rate_.numerator,fpsDen=rate_.denominator,clips=clips,videoOverlays=preview.video_layers(p),
+                sprites=sprites,placements=placements)
+
+def gpu_video(p, work, total, w, h, preview):
+    """Video-only stream from the GPU exporter; None when the project needs paint() or the exporter fails."""
+    if not EXPORTER.is_file():return None
+    plan=export_plan(p,work,w,h)
+    if plan is None:return None
+    (work/'plan.json').write_text(json.dumps(plan));out=work/'gpu.mp4'
+    with (work/'gpu.log').open('w') as log:
+        proc=subprocess.Popen([str(EXPORTER),str(work/'plan.json'),str(out),str(QUALITY['preview' if preview else 'master']/100)],stdout=subprocess.PIPE,stderr=log,text=True)
+        try:
+            for line in proc.stdout:progress_file(work,'rendering',int(line),total)
+            return out if proc.wait()==0 else None
+        finally:stop(proc)
+
+def paint(p, work, w, h, preview, total):
+    """Video-only stream painted here frame by frame: decoded camera, Pillow composite, FFmpeg encoder."""
+    assets={a['id']:a for a in p['assets']};temp=work/'video.mp4'
+    with (work/'encode.log').open('w') as log:
+        encoder=subprocess.Popen([str(FF),'-hide_banner','-y','-v','error','-f','rawvideo','-pixel_format','rgb24','-video_size',f'{w}x{h}',
+                                  '-framerate',rate(p),'-i','pipe:0','-an',*ENCODER['preview' if preview else 'master'],'-pix_fmt','yuv420p','-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709',str(temp)],
+                                 stdin=subprocess.PIPE,stderr=log)
+        global_frame=0;overlays=OverlayDecoders(p,work)
+        try:
+            for c in p['clips']:
+                a=assets[c['asset']]
+                if a.get('hdr'): raise ValueError('Este editor exporta SDR Rec.709. Convierte el original HDR antes de importarlo.')
+                # Frames hidden by an opaque full-canvas overlay skip the camera decode; the output is identical.
+                # Splitting keeps source time and motion phase only at speed 1.
+                hid=[c.get('speed',1)==1 and graphics.hidden_base(p,global_frame+f,(w,h)) for f in range(c['length'])]
+                f0=0
+                while f0<c['length']:
+                    f1=f0
+                    while f1<c['length'] and hid[f1]==hid[f0]: f1+=1
+                    if hid[f0]:
+                        for _ in range(f0,f1):
+                            encoder.stdin.write(graphics.composite(None,p,global_frame,overlays.frames(global_frame),(w,h)).tobytes())
+                            global_frame+=1
+                            if global_frame%10==0: progress_file(work,'rendering',global_frame,total)
+                        f0=f1; continue
+                    part=project.slice_item(c,'clips',f0,f1)
+                    dec_log=(work/(c['id']+'.log')).open('w')
+                    decoder=subprocess.Popen([str(FF),'-hide_banner','-nostdin','-v','error',*video_input(part,p,a['path']),
+                                              '-vf',video_filter(part,p,w,h,a.get('lut')),'-frames:v',str(f1-f0),'-an','-f','rawvideo','-pix_fmt','rgb24','pipe:1'],stdout=subprocess.PIPE,stderr=dec_log)
+                    try:
+                        for _ in range(f0,f1):
+                            raw=decoder.stdout.read(w*h*3)
+                            if len(raw)!=w*h*3: raise ValueError('Faltan fotogramas al decodificar: '+a['name'])
+                            encoder.stdin.write(raw if graphics.bare(p,global_frame) else graphics.composite(Image.frombytes('RGB',(w,h),raw),p,global_frame,overlays.frames(global_frame)).tobytes())
+                            global_frame+=1
+                            if global_frame%10==0: progress_file(work,'rendering',global_frame,total)
+                        decoder.stdout.close()
+                        if decoder.wait(): raise ValueError('Error de decodificación del medio')
+                    finally:
+                        stop(decoder)
+                        dec_log.close()
+                    f0=f1
+            encoder.stdin.close()
+            if encoder.wait(): raise ValueError('No se pudo codificar el vídeo')
+        finally:
+            stop(encoder)
+            overlays.close()
+    return temp
+
+def render(p, folder, preview=False, with_audio=True, label='', gpu=False):
     project.validate(p,check_files=True)
     if not p['clips']: raise ValueError('Añade al menos un clip de vídeo')
     total=project.duration(p); fps=p['fps']; stamp=project.uid()
@@ -347,54 +454,18 @@ def render(p, folder, preview=False, with_audio=True, label=''):
     w,h=p['width'],p['height']
     if preview and w>960:
         h=round(h*960/w/2)*2; w=960
-    assets={a['id']:a for a in p['assets']}
     if preview:filename=f'preview-r{p["revision"]}-{label+"-" if label else ""}{stamp}.mp4'
     else:
         name=re.sub(r'[/\\:]+','-',p.get('name','Vídeo')).strip() or 'Vídeo'
         filename=f'{name} - r{p["revision"]} - {stamp}.mp4'
     out=folder/filename
-    temp=work/'video.mp4'; log=(work/'encode.log').open('w')
-    encoder=subprocess.Popen([str(FF),'-hide_banner','-y','-v','error','-f','rawvideo','-pixel_format','rgb24','-video_size',f'{w}x{h}',
-                              '-framerate',rate(p),'-i','pipe:0','-an',*ENCODER['preview' if preview else 'master'],'-pix_fmt','yuv420p','-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709',str(temp)],
-                             stdin=subprocess.PIPE,stderr=log)
-    tick=time.monotonic(); global_frame=0;overlays=OverlayDecoders(p,work)
+    tick=time.monotonic()
     try:
-        for c in p['clips']:
-            a=assets[c['asset']]
-            if a.get('hdr'): raise ValueError('Este editor exporta SDR Rec.709. Convierte el original HDR antes de importarlo.')
-            # Frames hidden by an opaque full-canvas overlay skip the camera decode; the output is identical.
-            # Splitting keeps source time and motion phase only at speed 1.
-            hid=[c.get('speed',1)==1 and graphics.hidden_base(p,global_frame+f,(w,h)) for f in range(c['length'])]
-            f0=0
-            while f0<c['length']:
-                f1=f0
-                while f1<c['length'] and hid[f1]==hid[f0]: f1+=1
-                if hid[f0]:
-                    for _ in range(f0,f1):
-                        encoder.stdin.write(graphics.composite(None,p,global_frame,overlays.frames(global_frame),(w,h)).tobytes())
-                        global_frame+=1
-                        if global_frame%10==0: progress_file(work,'rendering',global_frame,total)
-                    f0=f1; continue
-                part=project.slice_item(c,'clips',f0,f1)
-                dec_log=(work/(c['id']+'.log')).open('w')
-                decoder=subprocess.Popen([str(FF),'-hide_banner','-nostdin','-v','error',*video_input(part,p,a['path']),
-                                          '-vf',video_filter(part,p,w,h,a.get('lut')),'-frames:v',str(f1-f0),'-an','-f','rawvideo','-pix_fmt','rgb24','pipe:1'],stdout=subprocess.PIPE,stderr=dec_log)
-                try:
-                    for _ in range(f0,f1):
-                        raw=decoder.stdout.read(w*h*3)
-                        if len(raw)!=w*h*3: raise ValueError('Faltan fotogramas al decodificar: '+a['name'])
-                        img=graphics.composite(Image.frombytes('RGB',(w,h),raw),p,global_frame,overlays.frames(global_frame))
-                        encoder.stdin.write(img.tobytes())
-                        global_frame+=1
-                        if global_frame%10==0: progress_file(work,'rendering',global_frame,total)
-                    decoder.stdout.close()
-                    if decoder.wait(): raise ValueError('Error de decodificación del medio')
-                finally:
-                    stop(decoder)
-                    dec_log.close()
-                f0=f1
-        encoder.stdin.close()
-        if encoder.wait(): raise ValueError('No se pudo codificar el vídeo')
+        # At 4K the GPU halves a preview's energy. Up to 1080p it doubles it: paint() hands bare frames straight to the encoder.
+        temp=gpu and (not preview or p['width']>1920) and gpu_video(p,work,total,w,h,preview)
+        engine='gpu' if temp else 'cpu'
+        if cost:=costs.current.get():cost['detail']=('preview-' if preview else 'master-')+engine
+        if not temp:temp=paint(p,work,w,h,preview,total)
         progress_file(work,'mixing',total,total)
         if with_audio:
             audio=render_audio(p,work)
@@ -403,17 +474,14 @@ def render(p, folder, preview=False, with_audio=True, label=''):
         else:run(['-v','error','-i',temp,'-an','-c:v','copy','-movflags','+faststart',out])
         run(['-v','error','-hwaccel','videotoolbox','-i',out,'-f','null','-'])
         metadata=dict(path=str(out.resolve()),frames=total,duration=total/fps,width=w,height=h,revision=p['revision'],
-                      seconds=round(time.monotonic()-tick,2),bytes=out.stat().st_size,preview=preview)
+                      seconds=round(time.monotonic()-tick,2),bytes=out.stat().st_size,preview=preview,engine=engine)
         project.atomic_json(out.with_suffix('.json'),metadata)
         progress_file(work,'done',total,total)
         return metadata
     except BaseException:
-        progress_file(work,'error',global_frame,total)
+        progress_file(work,'error')
         raise
     finally:
-        stop(encoder)
-        overlays.close()
-        log.close()
         # Only private intermediates produced by this render, never sources or deliverables.
         shutil.rmtree(work)
 
@@ -422,14 +490,17 @@ def save_frame(im, p, n, folder):
     im.save(out,quality=92)
     return {'path':str(out.resolve()),'frame':n,'revision':p['revision']}
 
-def frame(p, n, folder, width=960):
+def frame(p, n, folder, width=960, timeout=None):
+    deadline=time.monotonic()+timeout if timeout is not None else None
+    def remaining():
+        return max(.001,deadline-time.monotonic()) if deadline is not None else None
     n=max(0,min(int(n),project.duration(p)-1)); offset=0
     folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
     assets={a['id']:a for a in p['assets']}
     for c in p['clips']:
         if n<offset+c['length']:
             a=assets[c['asset']]; w=width; h=round(p['height']*w/p['width']/2)*2
-            video_frames={g['id']:overlay_frame(p,g,n,folder) for g in p['graphics'] if g.get('type')=='video' and not g.get('hidden') and g['start']<=n<g['start']+g['length']}
+            video_frames={g['id']:overlay_frame(p,g,n,folder,timeout=remaining()) for g in p['graphics'] if g.get('type')=='video' and not g.get('hidden') and g['start']<=n<g['start']+g['length']}
             if graphics.hidden_base(p,n,(w,h),video_frames):
                 return save_frame(graphics.composite(None,p,n,video_frames,(w,h)),p,n,folder)
             cc=dict(c); local=n-offset
@@ -450,7 +521,7 @@ def frame(p, n, folder, width=960):
             if cached.exists():
                 with Image.open(cached) as decoded:base=decoded.convert('RGB')
             else:
-                raw=run(args)
+                raw=run(args,timeout=remaining())
                 if len(raw)<w*h*3: raise ValueError('No se pudo leer el fotograma')
                 base=Image.frombytes('RGB',(w,h),raw[:w*h*3])
                 with tempfile.NamedTemporaryFile(prefix='.source-',suffix='.png',dir=folder,delete=False) as temp:tmp=Path(temp.name)

@@ -104,7 +104,7 @@ class Regressions(unittest.TestCase):
     def test_encoder_failure_is_bounded(self):
         self.media();self.p['clips'][0]['length']=3
         tick=time.monotonic()
-        with patch.object(graphics,'composite',side_effect=ValueError('synthetic drawing error')):
+        with patch.object(graphics,'composite',side_effect=ValueError('synthetic drawing error')),patch.object(graphics,'bare',return_value=False):
             with self.assertRaises(ValueError):render.render(self.p,self.root/'exports',preview=True)
         self.assertLess(time.monotonic()-tick,8)
         self.assertFalse(list((self.root/'exports').glob('.work-*')))
