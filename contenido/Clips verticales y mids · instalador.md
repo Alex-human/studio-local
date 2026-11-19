@@ -1,6 +1,6 @@
 # Tu máquina de contenido · instalador para Mac
 
-Versión 3.1 · 8 de noviembre de 2026
+Versión 3.2 · 19 de noviembre de 2026
 
 ## Empieza aquí
 
@@ -23,6 +23,8 @@ El editor es [Studio Local](https://github.com/Alex-human/studio-local). Si desc
 - **Vídeos completos de YouTube:** ordenar las tomas, construir el hilo, cuidar cortes, encuadre, textos, color y sonido. Puedes elegir una introducción elaborada y un cuerpo más limpio, o editar visualmente todo el vídeo.
 - **Valor concentrado:** quitar repeticiones y desvíos conservando significado, pruebas, matices y sincronía de los gráficos.
 - **Motion graphics de tu canal:** definir referencias, estética, composición, movimiento y sonido; probar una animación y guardarla como dirección propia. Usa las capacidades comprobadas de Studio o un motor local compatible; no incluye un generador 3D.
+- **Ganchos que aprenden:** propone tres ganchos por clip desde estructuras que ya funcionaron, aprende de cómo los corriges y te dice qué ganchos rinden en tus cuentas cuando le pasas las vistas.
+- **Miniaturas de YouTube:** a partir de tu foto real y una referencia, un boceto o una descripción, con el título editable y sin que la IA te cambie la cara.
 - **Tu perfil de canal:** audiencia, estilo, voces, permisos y carpeta de entrega. Puedes tener varios canales sin mezclar sus estilos.
 - **Studio Local, opcional:** un editor visual para revisar y retocar el montaje, dejar comentarios sobre un fotograma y pedir a la IA que los aplique. Las skills también funcionan sin él.
 - **Entrega:** vídeos en una carpeta del Mac; si lo eliges y conectas tu cuenta, también en Drive, repartidos por días.
@@ -33,7 +35,7 @@ La IA necesita leer y escribir archivos y ejecutar programas **en tu Mac**: adju
 
 La transcripción y el render se ejecutan localmente, sin una API de pago de vídeo. Tu asistente puede procesar los textos e imágenes que lea según su servicio; «local» no significa que el chat sea offline. Drive solo se utiliza si lo eliges. La instalación necesita internet y varios GB para herramientas y modelos; tus vídeos pueden ocupar mucho más.
 
-Después podrás decir: «edita este vídeo de YouTube», «aplica Valor concentrado», «haz motion graphics con el estilo de mi canal», «haz clips de esta grabación», «saca mids de esta llamada» o, con Studio, «aplica mis comentarios».
+Después podrás decir: «edita este vídeo de YouTube», «aplica Valor concentrado», «haz motion graphics con el estilo de mi canal», «haz clips de esta grabación», «saca feedback de ganchos», «hazme la miniatura de este vídeo», «saca mids de esta llamada» o, con Studio, «aplica mis comentarios».
 
 ## Para el agente · acompañar la instalación
 
@@ -55,7 +57,7 @@ Usa el agente que ejecuta el encargo; solo pregunta por instalar también en otr
 
 ### 2. Extraer el paquete
 
-El documento contiene diez recursos completos (seis skills y cuatro herramientas o guías) y sus huellas. Guarda el siguiente extractor en un temporal y ejecútalo con **la ruta de este documento** y **la carpeta de skills**. Para Claude, por ejemplo:
+El documento contiene doce recursos completos (siete skills y cinco herramientas o guías) y sus huellas. Guarda el siguiente extractor en un temporal y ejecútalo con **la ruta de este documento** y **la carpeta de skills**. Para Claude, por ejemplo:
 
 ```bash
 python3 extraer.py "/ruta/Máquina de contenido · instalador.md" "$HOME/.claude/skills" --plan
@@ -77,9 +79,9 @@ from pathlib import Path
 import re
 import tempfile
 
-TOOLS = ("clipkit.py", "CONFIGURAR.md", "CORTES.md", "STUDIO.md")
+TOOLS = ("clipkit.py", "CONFIGURAR.md", "CORTES.md", "GANCHOS.md", "STUDIO.md")
 SKILLS = ("maquina-contenido", "clips-verticales", "mids-desde-grabaciones",
-          "editar-video", "valor-concentrado", "motion-graphics")
+          "editar-video", "valor-concentrado", "motion-graphics", "miniaturas-youtube")
 
 
 def plan(document, skills, tools):
@@ -212,7 +214,7 @@ Con vídeo, comprueba duración y elige una frase completa corta dentro de ella;
 
 ### 7. Cerrar el onboarding
 
-Entrega qué quedó instalado, dónde, canal y estilo, prueba visible y pendientes. Enséñale peticiones útiles para su caso. Con Studio, explica Espacio, ⌘Z y ⌘F. Verifica que el agente reconoce las seis skills; si no, comprueba la ruta y reinicia la sesión solo cuando haga falta.
+Entrega qué quedó instalado, dónde, canal y estilo, prueba visible y pendientes. Enséñale peticiones útiles para su caso. Con Studio, explica Espacio, ⌘Z y ⌘F. Verifica que el agente reconoce las siete skills; si no, comprueba la ruta y reinicia la sesión solo cuando haga falta.
 
 Instalar no autoriza publicar, conectar cuentas nuevas, subir material, comprar servicios ni limpiar fuentes. Conserva la primera prueba para revisión; Drive, calendario y limpieza recuperable se ejecutan cuando el usuario los pida.
 
@@ -220,16 +222,18 @@ Instalar no autoriza publicar, conectar cuentas nuevas, subir material, comprar 
 
 | Archivo | SHA-256 |
 | --- | --- |
-| `~/ClipsYMids/clipkit.py` | `3e00a3dfb2b4b522e853c062748f6e4841df73ff748b98dc9658b9c65a39254f` |
+| `~/ClipsYMids/clipkit.py` | `6df3c3baa855173827ecb418482b5a44f61ab21f57346a96216348cf5871a627` |
 | `~/ClipsYMids/CONFIGURAR.md` | `7ab96aa7e530525e517269e4012a12d470867dbfe4e8cd542bf68b94db5a9d78` |
 | `~/ClipsYMids/CORTES.md` | `2d5da7bcf5d5e0a096ada0517af3f37c0b9df3fc47f0d4f1971abb3b1beb53f3` |
-| `~/ClipsYMids/STUDIO.md` | `91e857e6a42a84b5d70bec31776a5330252d206e94e19844d1104e5f55b62e59` |
-| `<skills>/maquina-contenido/SKILL.md` | `400a6269b3617a45fab331b6b7e88660e80a8a30029927118c70d986edf48816` |
-| `<skills>/clips-verticales/SKILL.md` | `f92b552e79e314b46d78eff7c2d4abcd29f4eefd7675d1753309f14d9fae0296` |
+| `~/ClipsYMids/GANCHOS.md` | `0bcf1afc4b3ea0de727b17ad50bf135c1b121a10652443587a38e20bbaf0023b` |
+| `~/ClipsYMids/STUDIO.md` | `c4393046ef23efecdfaba2cffd3144b61884fe09e8a2e5f16f2513250cf7c5ad` |
+| `<skills>/maquina-contenido/SKILL.md` | `6e74d8fbdc0b2f9f485bf9ad0d6adaf239051b45d5f122a63640d15d085307fc` |
+| `<skills>/clips-verticales/SKILL.md` | `02a16e318017da4f35338c020c67891cd260625cd4b313f849aa2036c8ab5493` |
 | `<skills>/mids-desde-grabaciones/SKILL.md` | `57bc9d0c53aad46479386d02e0ad2c8ae56fe2b96ce4b7b5ad2d7d4711e4e49c` |
 | `<skills>/editar-video/SKILL.md` | `a35b3c4631aca3f55ded61e539c6be72ff9d7244c1a530c5f55131f0af115d78` |
 | `<skills>/valor-concentrado/SKILL.md` | `472207190dcedf45ff7475cc5cee01a33835bd6fef861230162aa64cc73923f3` |
 | `<skills>/motion-graphics/SKILL.md` | `5162d5e678c132c6bab9838fa566f1b37f7a1aa2c0c3e572c815fef6b5bf7033` |
+| `<skills>/miniaturas-youtube/SKILL.md` | `a8f5b514bf7cc9a333b94c382522d2d1b550ad2c1096f2d1be628f7364bd9075` |
 
 ## Archivos
 
@@ -250,6 +254,7 @@ Ordenes (python3 clipkit.py <orden> -h para el detalle):
   fuentes      nombres de familia de las fuentes de una carpeta
   fotograma    extrae un fotograma de la fuente
   muestra      fotograma de prueba del estilo de un perfil
+  ganchos      qué ganchos rinden en las cuentas de un canal
 
 Solo biblioteca estandar + ffmpeg/ffprobe; para transcribir, un motor Whisper
 (mlx-whisper, faster-whisper u openai-whisper) en este Python o en otro (--python).
@@ -271,7 +276,7 @@ import tempfile
 import unicodedata
 from pathlib import Path
 
-VERSION = "2.0"
+VERSION = "2.1"
 
 DEFAULTS = {
     "fuentes_dir": None,
@@ -1627,6 +1632,77 @@ def cmd_muestra(a):
 
 # ---------------------------------------------------------------- CLI
 
+GANCHOS = ("red", "publicado", "observado", "vistas", "duracion_s", "gancho", "estructura", "cuerpo", "enlace")
+DECISIONES = ("fecha", "clip", "propuesta", "final", "autor_final", "resultado", "nota")
+
+
+def cmd_ganchos(a):
+    """Vistas de cada pieza frente a la mediana de su red y mes; agrupa por estructura y por cuerpo."""
+    import csv
+    import datetime
+    import statistics
+    from collections import defaultdict
+    canal = Path(a.canal).expanduser()
+    if not canal.is_dir():
+        sys.exit(f"No existe la carpeta del canal: {canal}")
+    for nombre, cols in (("ganchos.csv", GANCHOS), ("decisiones.csv", DECISIONES)):
+        ruta = canal / nombre
+        if not ruta.exists():
+            with ruta.open("w", newline="", encoding="utf-8") as f:
+                csv.writer(f).writerow(cols)
+            print(f"Creado {ruta}")
+    with (canal / "ganchos.csv").open(encoding="utf-8") as f:
+        filas = list(csv.DictReader(f))
+    maduras, ignoradas = [], 0
+    for f in filas:
+        try:
+            edad = (datetime.date.fromisoformat(f["observado"]) - datetime.date.fromisoformat(f["publicado"])).days
+            f["vistas"] = int(str(f["vistas"]).replace(".", "").replace(",", "").strip())
+        except (KeyError, TypeError, ValueError):
+            ignoradas += 1
+            continue
+        if edad >= 3:
+            maduras.append(f)
+    print(f"{len(filas)} piezas; {len(maduras)} con 3 días o más."
+          + (f" {ignoradas} ignoradas: fechas AAAA-MM-DD y vistas enteras." if ignoradas else ""))
+    print("× = vistas frente a la mediana de su red y mes. Orienta; no prueba el efecto del gancho.")
+    for red in sorted({f["red"] or "(sin red)" for f in maduras}):
+        piezas = [f for f in maduras if (f["red"] or "(sin red)") == red and f["vistas"] >= 20]
+        por_mes = defaultdict(list)
+        for f in piezas:
+            por_mes[f["publicado"][:7]].append(f["vistas"])
+        for f in piezas:
+            f["x"] = f["vistas"] / max(statistics.median(por_mes[f["publicado"][:7]]), 1)
+        print(f"\n{red}: {len(piezas)} comparables")
+        grupos = defaultdict(list)
+        for f in piezas:
+            grupos[f["estructura"] or "(sin estructura)"].append(f)
+        for nombre, g in sorted(grupos.items(), key=lambda kv: -statistics.median(f["x"] for f in kv[1])):
+            mejor = max(g, key=lambda f: f["x"])
+            print(f"  {statistics.median(f['x'] for f in g):5.2f}×  n={len(g):<3} {nombre[:28]:<28} mejor: {mejor['gancho'][:60]}")
+        cuerpos = defaultdict(list)
+        for f in piezas:
+            if f.get("cuerpo"):
+                cuerpos[f["cuerpo"]].append(f)
+        for cuerpo, g in cuerpos.items():
+            if len(g) > 1:
+                print(f"  mismo cuerpo «{cuerpo}», distinto gancho:")
+                for f in sorted(g, key=lambda f: -f["x"]):
+                    print(f"    {f['x']:5.2f}×  {f['gancho'][:70]}")
+        if len(piezas) >= 30:
+            orden = sorted(piezas, key=lambda f: -f["x"])
+            n = max(3, len(orden) // 10)
+            print(f"  aciertos ({n}): " + " | ".join(f["gancho"][:40] for f in orden[:n]))
+            print(f"  fallos ({n}): " + " | ".join(f["gancho"][:40] for f in orden[-n:]))
+    with (canal / "decisiones.csv").open(encoding="utf-8") as f:
+        decisiones = [d for d in csv.DictReader(f) if d.get("final")]
+    if decisiones:
+        resultados = defaultdict(int)
+        for d in decisiones:
+            resultados[d.get("resultado") or "(sin resultado)"] += 1
+        print(f"\nRevisiones: {len(decisiones)} · " + ", ".join(f"{k} {v}" for k, v in sorted(resultados.items())))
+
+
 def main():
     ap = argparse.ArgumentParser(prog="clipkit", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1709,6 +1785,10 @@ def main():
     s.add_argument("--t", type=float, help="segundo de la fuente")
     s.add_argument("--gancho", help="texto del gancho de prueba (\\n para saltos)")
     s.set_defaults(fn=cmd_muestra)
+
+    s = sub.add_parser("ganchos", help="qué ganchos rinden en las cuentas de un canal")
+    s.add_argument("canal", help="carpeta del canal, p. ej. ~/ClipsYMids/canales/<slug>")
+    s.set_defaults(fn=cmd_ganchos)
 
     a = ap.parse_args()
     a.fn(a)
@@ -1971,6 +2051,49 @@ Para cada tiempo devuelve la energía en ese punto, el mínimo cercano y el sile
 - Destaca las palabras por su significado (la idea clave, el número, el contraste): una por bloque, rara vez dos. Ni todas ni al azar.
 ~~~~~
 
+### `~/ClipsYMids/GANCHOS.md`
+
+~~~~~markdown
+# Ganchos
+
+El gancho es el texto de arriba del clip y su primera frase. Su trabajo es que la persona correcta se quede a recibir lo que el clip le da. Las instrucciones expresas del usuario para un clip prevalecen sobre este método; si dicta una redacción, úsala y corrige solo ortografía y composición.
+
+## 1. Escribir un gancho
+
+1. **Parte del final.** Anota qué recibe el espectador: la frase y el segundo del montaje donde llega la respuesta. El gancho vende recibir esa respuesta, no la cuenta. Una promesa plana («cómo conseguir más clientes») o un misterio vacío («el truco que nadie ve») no bastan.
+2. **Elige la estructura antes de redactar.** Busca en `ganchos.csv` del canal las piezas que mejor rindieron (`clipkit.py ganchos`) y, si el usuario las da, referencias de cuentas de su nicho que destaquen frente a la media de su propia cuenta, no por vistas absolutas. Escoge referencias del mismo tipo de problema y de recompensa. Una etiqueta como «curiosidad» no es una estructura: anota la frase de la referencia y qué conservas de ella (situación, tensión, lo que se reserva, tono y orden de la frase).
+3. **Adapta sin apagar el ángulo.** Cambia lo necesario para que la promesa encaje en este clip. Propón tres ganchos desde al menos dos estructuras, el recomendado primero.
+4. **Comprueba la entrega.** Si el clip no paga lo que promete, cambia el gancho. Usa cifras, nombres o resultados solo si el clip los respalda; nunca traslades el importe o la autoridad de la referencia.
+5. **Compón después.** Pocas palabras (orientativo: 4–10), legibles en dos líneas, en el lenguaje del espectador del perfil y con la voz del canal. Acorta relleno, no la tensión ni el mecanismo.
+
+## 2. Qué hace que un gancho funcione
+
+Tres motores: **una estructura que ya funcionó**, **curiosidad** y **ruptura de una creencia**. Recursos para conseguirlos:
+
+- **Promesa, curiosidad y disrupción.** Lo disruptivo hace querer la promesa; sin ello, «5 consejos para…» no engancha.
+- **Afirmación disruptiva:** una contradicción que haga querer su explicación. Una afirmación sin choque es solo una opinión.
+- **De lo general a lo específico:** no abras con algo hiperconcreto que solo entiende quien ya conoce el tema; los términos habituales del nicho sí valen.
+- **Tesis contraria:** la creencia común, la promesa de desmontarla y por qué quien habla puede hacerlo.
+- **Connotación negativa:** subraya el error o lo que cuesta antes de la solución.
+- **Ruptura de expectativa:** el desenlace contradice lo que se esperaba, sin traicionar la promesa.
+
+## 3. Aprender de cada pieza
+
+Cada canal guarda dos archivos en `~/ClipsYMids/canales/<slug>/`. `clipkit.py ganchos <carpeta del canal>` crea los que falten y resume lo que rinde.
+
+- `decisiones.csv` (`fecha,clip,propuesta,final,autor_final,resultado,nota`): una fila por gancho propuesto. Al recibir la revisión, completa `final`, `autor_final` (`usuario` o `agente`), `resultado` (`igual`, `editado`, `sustituido`, `rechazado`) y el motivo. Un gancho reescrito por el usuario en Studio cuenta como `editado`. Lo que el usuario cambia es la mejor guía de su criterio: léelo antes de proponer el siguiente lote.
+- `ganchos.csv` (`red,publicado,observado,vistas,duracion_s,gancho,estructura,cuerpo,enlace`): una fila por pieza publicada, fechas `AAAA-MM-DD`. Las vistas salen del panel de la red o de un export de la herramienta de publicación que te dé el usuario, o de su perfil público si puedes leerlo. `estructura` es la plantilla del gancho en pocas palabras; `cuerpo` identifica el clip base, igual en las versiones de un mismo clip con distinto gancho.
+
+Reglas:
+
+- Las vistas se comparan con la mediana de la misma red y mes, solo en piezas con al menos 3 días y algo de reparto (20 vistas o más). Orientan; no prueban por sí solas el efecto del gancho. Si hay retención inicial, tiempo visto, comentarios o leads por pieza, pesan más; si solo hay vistas, dilo.
+- La comparación más limpia es el mismo cuerpo con otro gancho. Cambia una sola variable cada vez: idea, formato o gancho.
+- Reparte cada lote en unas 70 % de estructuras que ya funcionaron en el canal, 20 % de variaciones de ellas y 10 % nuevas; lo nuevo que funcione pasa al 70 %.
+- Cada 90 días o unas 30 piezas nuevas, compara el 10 % que más rindió con el 10 % que menos y anota en el perfil qué comparten los aciertos.
+
+Cuando el usuario pida «saca feedback de ganchos»: actualiza `ganchos.csv` con lo que te dé, ejecuta `clipkit.py ganchos`, contrástalo con los cambios de `decisiones.csv` y entrega como mucho cinco hallazgos (qué se observa, con cuántos casos y qué cambiarías). Cambia este criterio o el del perfil solo con su aprobación.
+~~~~~
+
 ### `~/ClipsYMids/STUDIO.md`
 
 ~~~~~markdown
@@ -1995,7 +2118,7 @@ Pregunta: **«¿Quieres trabajar con Studio Local, el editor visual para revisar
 
 ## Instalar o reutilizar
 
-Fuente pública: [Alex-human/studio-local](https://github.com/Alex-human/studio-local). Solo Mac Apple Silicon; este paquete acompaña la actualización 1.15.0 del 08-11-2026, optimizada para Mac (exportación por la GPU) y las nuevas descargas usan la rama `main`. Comprueba los requisitos del repositorio que vayas a instalar. No copies el editor privado de quien distribuye este archivo, ni sus proyectos, LUT, música o credenciales.
+Fuente pública: [Alex-human/studio-local](https://github.com/Alex-human/studio-local). Solo Mac Apple Silicon; este paquete acompaña la actualización 1.15.1 del 19-11-2026 (emojis en los ganchos, notas al momento y móvil más fluido) y las nuevas descargas usan la rama `main`. Comprueba los requisitos del repositorio que vayas a instalar. No copies el editor privado de quien distribuye este archivo, ni sus proyectos, LUT, música o credenciales.
 
 Si `instalacion.json` indica un `editor_incluido`, verifica que existen `LICENSE`, `ONBOARDING.md`, `setup.command` y `editor/engine/editor.py`: ese es el código del editor adjunto. Ofrécete a copiarlo a la carpeta elegida (`~/studio-local` por defecto) antes de instalar para que no dependa de una carpeta temporal de descargas. Si el destino ya existe, no lo sobrescribas: verifica o reutiliza su instalación.
 
@@ -2034,7 +2157,7 @@ Enséñale **Espacio** para reproducir, **⌘Z** para deshacer y **⌘F** para c
 ~~~~~markdown
 ---
 name: maquina-contenido
-description: Configurar y usar una máquina de edición en Mac con perfil propio de canal, vídeos completos, clips, YouTube Mids, Valor concentrado y motion graphics. Usar al configurar la máquina, añadir un canal o retomar su onboarding.
+description: Configurar y usar una máquina de edición en Mac con perfil propio de canal, vídeos completos, clips, YouTube Mids, Valor concentrado, motion graphics y miniaturas. Usar al configurar la máquina, añadir un canal o retomar su onboarding.
 ---
 
 # Máquina de contenido
@@ -2047,6 +2170,7 @@ Herramientas y perfiles en `~/ClipsYMids/`. Explica al usuario lo que necesita d
 - **Vídeo completo de YouTube:** carga `editar-video`.
 - **Concentrar el discurso de un montaje:** carga `valor-concentrado`.
 - **Animar una explicación:** carga `motion-graphics`; completa primero la dirección visual del canal si falta.
+- **Miniatura de YouTube:** carga `miniaturas-youtube`.
 - **Lote de ambos formatos:** usa una sola transcripción de la fuente, selecciona piezas completas para la audiencia y coordina ambas skills. Mantén su origen y ficha; no crees un número de piezas que la grabación no justifica.
 - **Comentarios de Studio:** lee `STUDIO.md` y el manual de la instalación elegida; aplica únicamente el feedback solicitado y resuélvelo tras comprobarlo.
 
@@ -2060,7 +2184,7 @@ La máquina selecciona, edita, revisa y entrega. Publicar en redes, conectar cue
 ~~~~~markdown
 ---
 name: clips-verticales
-description: Crear clips verticales (Reels, TikTok, Shorts) de cualquier canal o negocio a partir de vídeos largos o grabaciones, con cortes precisos, encuadre 9:16, gancho escrito y subtítulos en el estilo configurado del canal, y entregarlos en una carpeta o en Drive repartidos por días. Usar cuando pidan «haz clips», «saca reels, shorts o tiktoks de este vídeo», «clip del minuto X al Y», «propón clips» o «exporta y sube los clips». La primera vez configura el canal con preguntas.
+description: Crear clips verticales (Reels, TikTok, Shorts) de cualquier canal o negocio a partir de vídeos largos o grabaciones, con cortes precisos, encuadre 9:16, gancho escrito y subtítulos en el estilo configurado del canal, y entregarlos en una carpeta o en Drive repartidos por días. Usar cuando pidan «haz clips», «saca reels, shorts o tiktoks de este vídeo», «clip del minuto X al Y», «propón clips», «exporta y sube los clips» o «saca feedback de ganchos». La primera vez configura el canal con preguntas.
 ---
 
 # Clips verticales
@@ -2069,7 +2193,8 @@ Convierte momentos de un vídeo largo en clips verticales que se entienden solos
 
 - `clipkit.py`: transcripción, bordes de corte, subtítulos, render y verificación;
 - `CONFIGURAR.md`: preguntas iniciales y formato del perfil;
-- `CORTES.md`: método de corte y de subtítulos literales.
+- `CORTES.md`: método de corte y de subtítulos literales;
+- `GANCHOS.md`: cómo escribir ganchos y aprender de lo que rinde en el canal;
 - `STUDIO.md`: editor visual opcional y proyectos nativos editables.
 
 Si falta `~/ClipsYMids/clipkit.py`, pide al usuario que vuelva a ejecutar el instalador.
@@ -2096,7 +2221,7 @@ Si falta `~/ClipsYMids/clipkit.py`, pide al usuario que vuelva a ejecutar el ins
 - Transcribe y lee la grabación entera (`CORTES.md`, paso 1).
 - Elige momentos que la audiencia del perfil reconozca como suyos: una idea táctica completa, una historia con desenlace, un error con su solución, una afirmación contraintuitiva con su porqué.
 - Cada clip debe entenderse sin contexto previo y cerrar lo que abre. Prefiere una idea completa a un instante llamativo que deja la explicación fuera.
-- Presenta la lista: número, tramo, primera frase, por qué funciona para esa audiencia, duración aproximada y 2–3 ganchos posibles. Espera su visto bueno antes de renderizar, salvo que ya te haya dicho «haz los que veas».
+- Presenta la lista: número, tramo, primera frase, por qué funciona para esa audiencia, duración aproximada y tres ganchos según `GANCHOS.md`. Espera su visto bueno antes de renderizar, salvo que ya te haya dicho «haz los que veas».
 
 ## 3. Carpeta del trabajo
 
@@ -2155,9 +2280,8 @@ Genera `subtitulos.json` con bloques de palabras en el tiempo del clip montado. 
 
 ## 7. Gancho
 
-- Pocas palabras (orientativo: 4–10), en el lenguaje del espectador.
-- Nombra el problema o la promesa que el clip cumple de verdad. Si el clip no paga lo que promete el gancho, cambia el gancho.
-- Si el usuario no da gancho, propón 2–3. Si renderizas con el texto por defecto del perfil, ese clip queda como «gancho pendiente» y no se entrega como final.
+- Escríbelo, regístralo en `decisiones.csv` y saca su feedback según `~/ClipsYMids/GANCHOS.md`.
+- Si renderizas con el texto por defecto del perfil, ese clip queda como «gancho pendiente» y no se entrega como final.
 
 ## 8. Render y revisión
 
@@ -2453,4 +2577,42 @@ Lee `visual` en `~/ClipsYMids/canales/<slug>/perfil.json` y el brief del trabajo
 3. Para dibujos o escenas que excedan esas capas, comprueba primero qué motor local disponible puede producirlos. Conserva código y recursos junto a la escena e importa su vídeo como superposición. Explica qué parte se edita desde ese código. Sin motor compatible, deja esa escena pendiente y ofrece una representación que pueda comprobarse; la instalación del paquete no instala ni certifica un generador 3D.
 4. Revisa el vídeo real con su voz: inicio, desarrollo, final, transiciones consecutivas, lectura, encuadre, sincronía y sonido. Comprueba también una muestra del render final, no solo el visor. Una decodificación correcta no demuestra una estética aprobada.
 5. Integra sobre la revisión vigente y vuelve a comprobar entradas y salidas en el montaje. Si cambia el discurso, actualiza las anclas y la sincronía. Entrega proyecto, fuentes y prueba comprobada; exporta o publica solo dentro del encargo.
+~~~~~
+
+### `<skills>/miniaturas-youtube/SKILL.md`
+
+~~~~~markdown
+---
+name: miniaturas-youtube
+description: Crear o retocar miniaturas de YouTube a partir de una foto real y una referencia, un boceto o una descripción, conservando la cara sin deformarla y con el título en una capa editable. Usar cuando pidan «hazme la miniatura», «retoca esta miniatura», «cambia el texto de la miniatura» o den una referencia de miniatura para su vídeo.
+---
+
+# Miniaturas de YouTube
+
+Se trabaja por capas: fondo y gráficos, retrato fotográfico, integración y texto. La cara de la foto real nunca la redibuja un modelo.
+
+## 1. Encargo y estilo del canal
+
+- Usa el canal de `~/ClipsYMids/canales/<slug>/` y su `perfil.json` (audiencia y colores). El estilo de miniaturas vive en `canales/<slug>/miniaturas/ESTILO.md`: tipografía, colores, referencias aprobadas y lo que el usuario ha rechazado. Si no existe, pregunta en una sola vez por la fuente del título (propón **Arial Rounded MT Bold**, que viene en todos los Mac) y por dos o tres miniaturas que le gusten, y guárdalo.
+- Pide o localiza: la foto real (o un fotograma nítido del vídeo, anotando el segundo), el título del vídeo, el texto exacto de la miniatura y la referencia, el boceto en papel o la descripción. Si el texto no lo da, propón dos o tres que encajen con el título sin repetirlo. Si el vídeo existe, lee su transcripción para que lo dibujado no prometa algo que el vídeo no cuenta.
+- Antes de componer, fija la distribución (retrato y escala, texto y líneas, paleta, gráficos, espacio libre) replicando la jerarquía de la referencia, no solo sus colores.
+
+## 2. Componer
+
+Trabaja en `canales/<slug>/miniaturas/<vídeo>/vNN/` y escribe los scripts del encargo ahí mismo. En Mac, Swift con CoreGraphics, CoreText e ImageIO compone y renderiza sin instalar nada más que las herramientas de Apple.
+
+1. **Recorta a la persona** con una máscara revisable: Vision de macOS (`VNGenerateForegroundInstanceMaskRequest`, macOS 14 o posterior) o, si falla, una máscara explícita revisada a la vista. Guarda la cabeza recortada como capa fotográfica protegida. Escala uniformemente, sin deformar, y usa el mismo encuadre en todas las capas.
+2. **Fondo y gráficos:** foto, color, degradado o elementos dibujados con código. Los dibujos deben explicar una relación o una secuencia, no decorar.
+3. **Generación con IA, solo si el usuario la tiene:** para fondos, ilustraciones o integrar luz, usa el generador de imagen que tenga configurado (una API con su clave en una variable de entorno o la herramienta de su agente). Dile antes el coste por imagen si es de pago. Nunca le pidas que genere la cara: si una pasada la modifica, vuelve a poner encima la cabeza protegida y revisa la unión en sienes, mandíbula, cuello y pelo. Sin generador, la miniatura se hace igual por composición.
+4. **Integra:** luz desde la misma dirección, temperatura y contraste coherentes, bordes sin restos del fondo y transiciones suaves. Evita el contorno blanco, el halo y la sombra uniforme que dan efecto de pegatina. Ajustes moderados de exposición y color sí; no inventes ojos, dientes, piel ni expresión.
+5. **Título aparte**, con el archivo real de la fuente del estilo, en una capa editable. Comprueba letra a letra palabras, tildes y saltos de línea. Si la fuente no está instalada, dilo; no la sustituyas en silencio.
+
+## 3. Revisar y entregar
+
+- Compara la cara con la foto original al 100 %: debe ser la misma persona, con su textura. Revisa bordes, anatomía visible, luz y legibilidad.
+- Mírala también a unos 320 × 180 px: se reconoce a la persona, el texto se lee y nada importante queda abajo a la derecha, donde YouTube pone la duración.
+- Entrega `miniatura.jpg` de 1280 × 720, sRGB y menos de 2 MB, y conserva en la misma carpeta el máster, las capas (retrato, cabeza protegida, fondo, texto) y una ficha con título, texto, concepto, foto de origen, fuente y prompts si los hubo. Cada versión en su carpeta `vNN`: nunca sobrescribas una aprobada.
+- Corrige solo las capas que fallen. Anota en `ESTILO.md` lo que el usuario apruebe o rechace para las siguientes.
+
+No subas la miniatura a YouTube ni a otro servicio, ni cambies títulos, sin un encargo expreso para ese vídeo.
 ~~~~~
