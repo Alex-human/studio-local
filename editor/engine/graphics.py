@@ -126,12 +126,53 @@ def wrap_words(words, face, limit):
         else:line=(line+' '+word).strip()
     return lines+[line]
 
+EMOJI_FONT=Path('/System/Library/Fonts/Apple Color Emoji.ttc')  # bitmap strikes: drawn at 160 px and scaled
+
+def is_emoji(ch):
+    o=ord(ch);return o>=0x1F000 or 0x2600<=o<=0x27BF or 0x2B00<=o<=0x2BFF or o in (0x200D,0xFE0F,0x20E3)
+
+def emoji_runs(line):
+    """Line split into [is_emoji, text] runs; text fonts have no emoji glyphs and would draw a box."""
+    runs=[]
+    for ch in line:
+        if runs and runs[-1][0]==is_emoji(ch):runs[-1][1]+=ch
+        else:runs.append([is_emoji(ch),ch])
+    return runs
+
+class EmojiFace:
+    """Text face that measures and draws emoji with Apple Color Emoji at the text's size."""
+    def __init__(self, face, size):self.face,self.size=face,size
+    def getlength(self, line):
+        return sum(emoji_font().getlength(t)*self.size/160 if e else self.face.getlength(t) for e,t in emoji_runs(line))
+    def getbbox(self, line, anchor='ms'):
+        if not any(e for e,_ in emoji_runs(line)):return self.face.getbbox(line,anchor=anchor)
+        half=self.getlength(line)/2;return (-half,-self.size,half,0)
+    def draw(self, layer, x, base, line, color):
+        if not any(e for e,_ in emoji_runs(line)):return ImageDraw.Draw(layer).text((x,base),line,font=self.face,fill=color,anchor='ms')
+        cur=x-self.getlength(line)/2
+        for e,t in emoji_runs(line):
+            if e:
+                image=emoji_image(t,self.size);layer.alpha_composite(image,(round(cur),round(base+self.size*.1-image.height)))
+            else:ImageDraw.Draw(layer).text((cur,base),t,font=self.face,fill=color,anchor='ls')
+            cur+=self.getlength(t)
+
+@lru_cache(maxsize=1)
+def emoji_font():
+    return ImageFont.truetype(str(EMOJI_FONT),160)
+
+@lru_cache(maxsize=32)
+def emoji_image(run, size):
+    width=max(1,math.ceil(emoji_font().getlength(run)));image=Image.new('RGBA',(width,160))
+    ImageDraw.Draw(image).text((0,160),run,font=emoji_font(),embedded_color=True,anchor='ls')
+    return image.resize((max(1,round(width*size/160)),max(1,round(size))),Image.LANCZOS)
+
 @lru_cache(maxsize=128)
 def native_hook_parts(content, x, y, size, width):
     """Instagram's own Reels text with background, measured on a native capture: Instagram Sans UI Heavy, centred
     lines and one rounded card around them. Written line breaks stay unless a line overflows; then the text is balanced."""
     own=ASSETS/'fonts/instagram/InstagramSansUI-Heavy.ttf'  # Meta's font is not redistributable: add it yourself or use Inter
     face=ImageFont.truetype(str(own if own.exists() else ASSETS/'fonts/editorial/InterVariable.ttf'),max(8,round(size)))
+    if any(map(is_emoji,content)):face=EmojiFace(face,size)
     pad=size*.405;limit=width-2*pad
     lines=[line.strip() for line in content.splitlines() if line.strip()] or [' ']
     if max(face.getlength(line) for line in lines)>limit:
@@ -149,6 +190,9 @@ def native_hook(layer, content, x, y, size, width, color, fill):
     mask=Image.new('L',(w*4,h*4))  # supersampled card; an integer shift of the sprite keeps the same pixels
     ImageDraw.Draw(mask).rounded_rectangle([(card[0]-left)*4,(card[1]-top)*4,(card[2]-left)*4,(card[3]-top)*4],radius*4,fill=255)
     layer.paste(ImageColor.getrgb(fill)[:3]+(255,),(left,top),mask.resize((w,h),Image.BOX))
+    if isinstance(face,EmojiFace):
+        for line,base in rows:face.draw(layer,x,base,line,color)
+        return
     draw=ImageDraw.Draw(layer)
     for line,base in rows:draw.text((x,base),line,font=face,fill=color,anchor='ms')
 
@@ -208,7 +252,9 @@ def text_sprite(size, props=None, caption=None):
             boxes+=[(l-1,t-1,r+2,b+2) for l,t,r,b in bands]+[d.textbbox((x,base),line,font=face,anchor='ms') for line,base in rows]
         elif props.get('style')=='native':
             face,rows,card,_=native_hook_parts(title,x,y,font_size,w*.9)
-            boxes+=[(card[0]-1,card[1]-1,card[2]+2,card[3]+2)]+[d.textbbox((x,base),line,font=face,anchor='ms') for line,base in rows]
+            ink=(lambda line,base:tuple(v+o for v,o in zip(face.getbbox(line),(x,base,x,base)))) if isinstance(face,EmojiFace)\
+                else (lambda line,base:d.textbbox((x,base),line,font=face,anchor='ms'))
+            boxes+=[(card[0]-1,card[1]-1,card[2]+2,card[3]+2)]+[ink(line,base) for line,base in rows]
         else:
             weight=props.get('weight',580);font_size=fit_text(title,w*.86,font_size,weight)
             bounds(x,y+3*sc,title,font_size,weight,pad=math.ceil(24*sc+4),align=props.get('align','left'))

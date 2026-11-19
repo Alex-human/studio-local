@@ -20,7 +20,7 @@ Las esperas de descarga, descodificación o activación de audio tienen límite 
 
 ## Ediciones y comentarios
 
-La última imagen permanece hasta mostrar la revisión nueva. Las acciones usan identificador persistente: una respuesta perdida no repite un corte. Si una escritura queda incierta, relee el proyecto antes de reenviar; conflictos y comentarios conservan el borrador. Deshacer comparte historial con el Mac y puede deshacer su última acción.
+Un comentario nuevo sobre el fotograma en pantalla muestra al momento esa imagen del teléfono; guardar publica la nota sin esperar a la captura, que el Mac completa después y reintenta si falla. La última imagen permanece hasta mostrar la revisión nueva. Las acciones usan identificador persistente: una respuesta perdida no repite un corte. Si una escritura queda incierta, relee el proyecto antes de reenviar; conflictos y comentarios conservan el borrador. Deshacer comparte historial con el Mac y puede deshacer su última acción.
 
 `server.py` adapta operaciones limitadas al motor. HTML, JavaScript y SoundTouchJS 2.1.1 (MPL-2.0) se sirven localmente, sin CDN. `.runtime/` guarda logs y caché regenerable, nunca fuentes. El acceso remoto se configura aparte y no lo habilita el instalador de contenido por defecto.
 

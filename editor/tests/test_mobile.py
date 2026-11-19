@@ -229,8 +229,10 @@ class Mobile(unittest.TestCase):
         self.assertTrue(response['ok'],response)
         self.assertEqual(self.path.read_bytes(),before)
         note = response['result']['note']
-        self.assertEqual((note['status'],note['capture'],note['frame']),('open','ready',75))
+        self.assertEqual((note['status'],note['frame']),('open',75))
         self.assertNotIn('files',note)
+        self.captured()
+        self.assertEqual(self.app.state(self.pid)['notes'][0]['capture'],'ready')
         self.assertTrue((self.path.parent/'feedback'/'mobile-note'/'annotated.png').exists())
         self.edit({'type':'resize','kind':'clips','id':'clip','edge':'start','delta':15})
         self.assertEqual(self.app.state(self.pid)['notes'][0]['currentFrame'],60)
@@ -255,24 +257,50 @@ class Mobile(unittest.TestCase):
             self.assertEqual(kind,'video/mp2t')
             self.assertGreater(len(ts),0)
 
-    def test_feedback_duplicate_id_cannot_overwrite_and_capture_respects_concurrent_version(self):
+    def captured(self, app=None):
+        for _ in range(1000):
+            if not (app or self.app).capturing:return
+            time.sleep(.01)
+        self.fail('pictures still to take')
+
+    def test_feedback_duplicate_id_cannot_overwrite(self):
         req=self.req(action='note',noteId='race',frame=75,text='Móvil',strokes=[])
-        original=mobile.editor.dispatch
-        def concurrent_capture(value):
-            result=original(value)
-            if value.get('command')=='capture':
-                original({'action':'feedback','project':str(self.path),'command':'update','id':'race',
-                          'version':result['version'],'values':{'text':'Cambio del Mac'}})
-                return original({'action':'feedback','project':str(self.path),'command':'get','id':'race'})
-            return result
-        with patch.object(mobile.editor,'dispatch',side_effect=concurrent_capture):
-            result=self.app.query(req)
-        self.assertTrue(result['conflict'])
-        note=self.app.state(self.pid)['notes'][0]
-        self.assertEqual(note['text'],'Cambio del Mac')
+        self.assertTrue(self.app.query(req)['ok'])
+        mobile.editor.dispatch({'action':'feedback','project':str(self.path),'command':'update','id':'race','version':2,'values':{'text':'Cambio del Mac'}})
         req['requestId']=uuid.uuid4().hex
         self.assertTrue(self.app.query(req)['conflict'])
         self.assertEqual(self.app.state(self.pid)['notes'][0]['text'],'Cambio del Mac')
+
+    def test_a_note_is_open_at_once_and_its_picture_follows_with_the_strokes_of_then(self):
+        stroke={'tool':'pen','color':'#ffb777','width':.006,'points':[[.1,.2],[.4,.3]]}
+        folder=self.path.parent/'feedback'/'now'
+        with self.app.media, concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:  # whatever is rendering, saving does not wait
+            note=pool.submit(self.app.query,self.req(action='note',noteId='now',frame=75,text='Al momento',strokes=[])).result(timeout=3)['result']['note']
+            self.assertEqual((note['status'],note['capture']),('open','pending'))
+            edited=pool.submit(self.app.query,self.req(action='note',noteId='now',version=note['version'],frame=75,text='Al momento',strokes=[stroke])).result(timeout=3)
+            self.assertTrue(edited['ok'],'a note whose picture is still to take is edited')
+            self.assertFalse((folder/'frame.png').exists())
+        self.captured()
+        self.assertNotEqual((folder/'frame.png').read_bytes(),(folder/'annotated.png').read_bytes(),'drawn with the strokes it has now')
+
+    def test_a_picture_left_by_a_restart_or_a_failure_is_taken(self):
+        with patch.object(mobile.Companion,'capture_later'):  # the service stops right after saving
+            self.assertTrue(self.app.query(self.req(action='note',noteId='left',frame=75,text='Guardado',strokes=[]))['ok'])
+        self.assertEqual(self.app.state(self.pid)['notes'][0]['capture'],'pending')
+        again,original,failed=mobile.Companion(self.work/'projects',self.work/'runtime'),mobile.editor.dispatch,[]
+        def once(req):
+            if req.get('command')=='capture' and not failed:failed.append(req['id']);raise ValueError('falla una vez')
+            return original(req)
+        with patch.object(mobile.editor,'dispatch',side_effect=once), patch.object(mobile.Companion,'RETRY',.01):
+            again.catalog();again.sweep();self.captured(again)
+        self.assertEqual(failed,['left'])
+        self.assertEqual(again.state(self.pid)['notes'][0]['capture'],'ready','taken after the restart, and again after failing')
+
+    def test_a_reader_asking_for_a_picture_not_yet_taken_gets_it(self):
+        mobile.editor.dispatch(dict(project=str(self.path),revision=mobile.project.load(self.path)['revision'],action='feedback',command='create',id='early',frame=75))
+        self.assertEqual(self.app.state(self.pid)['notes'][0]['capture'],'pending')
+        data,kind=self.app.note_image(self.pid,'early')
+        self.assertEqual((data[:4],kind),(b'\x89PNG','image/png'))
 
     def test_unchanged_interval_survives_edits_and_cached_media_never_waits_for_render_lock(self):
         p = mobile.project.load(self.path)
@@ -577,6 +605,61 @@ class Mobile(unittest.TestCase):
             self.assertEqual(mobile.running(),loaded)
             os.utime(engine/'project.py',ns=(1,1))
             self.assertNotEqual(mobile.running(),loaded,'an engine changed on the Mac is not the one this service loaded')
+
+    def test_a_request_on_one_montage_reads_that_montage_and_the_poll_reads_nothing(self):
+        other=self.work/'projects'/'Otro'/'Proyecto.studio';other.parent.mkdir()
+        mobile.project.save(other,mobile.project.new('Otro'))
+        self.app.catalog()
+        read,load=[],mobile.project.load
+        with patch.object(mobile.project,'load',side_effect=lambda path:read.append(Path(path).resolve()) or load(path)):
+            state=self.app.state(self.pid)
+            self.app.query(self.req(action='directPlan'))
+            self.assertTrue(self.edit({'type':'splitAt','frame':120})['ok'])
+            self.assertNotIn(other.resolve(),read,'nothing else in the library is read')
+            rev=mobile.project.load(self.path)['revision'];self.app.state(self.pid,rev);read.clear()
+            self.assertEqual(self.app.state(self.pid,rev)['project'],None)
+            self.assertEqual(read,[],'an unchanged montage with unchanged notes is answered without reading it')
+        state['project']['name']='cambiado'
+        self.assertEqual(self.app.state(self.pid)['project']['name'],'Prueba móvil','what a request gets is read again, never a shared copy')
+        # Every change is still seen: the montage changed on the Mac, a note created, a note rewritten.
+        mobile.editor.dispatch(dict(project=str(self.path),revision=rev,action='ops',ops=[dict(op='set',kind='graphics',id='hook',values={'props':{'text':'Del Mac','size':70}})]))
+        self.assertEqual(self.app.state(self.pid,rev)['revision'],rev+1)
+        mobile.editor.dispatch(dict(project=str(self.path),action='feedback',command='create',id='nota',frame=10))
+        self.assertEqual([n['id'] for n in self.app.state(self.pid,rev+1)['notes']],['nota'])
+        mobile.editor.dispatch(dict(project=str(self.path),action='feedback',command='update',id='nota',version=1,values={'text':'otra'}))
+        self.assertEqual(self.app.state(self.pid,rev+1)['notes'][0]['text'],'otra')
+        twin=self.work/'projects'/'Copia'/'Proyecto.studio';twin.parent.mkdir();twin.write_bytes(self.path.read_bytes())
+        self.assertRaisesRegex(ValueError,'misma identidad',self.app.query,{'action':'library'})
+
+    def test_a_plan_does_not_read_its_texts_again_or_rewrite_the_time_of_each_file(self):
+        first=self.app.query(self.req(action='directPlan'))
+        for x in first['clips']+first['audio']:
+            path=self.app.direct.folder/x['url'].rsplit('/',1)[1];path.write_bytes(b'x');os.utime(path,(1,1))
+        with patch.object(direct.preview.Image,'open',side_effect=AssertionError('a text read again')):
+            self.assertEqual(self.app.query(self.req(action='directPlan'))['pending'],[])
+            with patch.object(direct.os,'utime',side_effect=AssertionError('a time rewritten')):
+                self.assertEqual(self.app.query(self.req(action='directPlan'))['pending'],[],'a file this process marked within the minute')
+        # What a plan marked counts as used for the cache, whatever its file's time; and the folder is not listed after each build.
+        d=self.app.direct;gone=d.folder/('0'*32+'.mp4')
+        with gone.open('wb') as file:file.truncate(7*1024**3)
+        os.utime(gone,(1,1));d.prune()
+        self.assertFalse(gone.exists());self.assertTrue(all((d.folder/x['url'].rsplit('/',1)[1]).exists() for x in first['clips']))
+        os.utime(d.folder/first['clips'][0]['url'].rsplit('/',1)[1],(1,1))
+        with patch.object(direct.os,'scandir',side_effect=AssertionError('listed again')):d.prune(first['clips'][0]['url'].rsplit('/',1)[1])
+
+    def test_one_connection_carries_many_requests_and_a_refused_one_closes_it(self):
+        server=mobile.serve(self.work/'projects',self.work/'keep-runtime',port=0)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            c=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=10)
+            headers={'Origin':server.origin,'Content-Type':'application/json','X-Studio-Mobile':'1'}
+            c.request('GET','/');sock=c.sock;c.getresponse().read()
+            c.request('POST','/api',json.dumps({'action':'library'}),headers);self.assertIs(c.sock,sock,'the second request goes on the same connection')
+            self.assertTrue(json.loads(c.getresponse().read())['ok'])
+            c.request('POST','/api','{"action":"library"}');r=c.getresponse();r.read()
+            self.assertEqual((r.status,r.getheader('Connection')),(403,'close'),'an unread body ends the connection, said')
+            c.request('GET','/');self.assertEqual(c.getresponse().status,200);c.close()
+        finally:server.shutdown();server.server_close();thread.join()
 
     def test_phone_reports_are_appended_and_bounded(self):
         self.app.query({'action':'clientLog','entries':[{'event':'played','ms':120},'x',{'event':'error','message':'m'*5000}]})

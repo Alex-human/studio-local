@@ -23,7 +23,7 @@ cp assets/app-icon/StudioIcon.icns "$bundle/Contents/Resources/StudioIcon.icns"
 /usr/bin/python3 - "$bundle/Contents/Info.plist" "${STUDIO_APP_ID:-local.studiolocal.app}" "${STUDIO_APP_NAME:-Studio Local}" <<'PY'
 import plistlib,sys
 with open(sys.argv[1],'wb') as f:
-    plistlib.dump(dict(CFBundleExecutable='StudioLocal',CFBundleIdentifier=sys.argv[2],CFBundleName=sys.argv[3],CFBundleIconFile='StudioIcon.icns',CFBundlePackageType='APPL',CFBundleVersion='27',CFBundleShortVersionString='1.15.0',NSHighResolutionCapable=True),f)
+    plistlib.dump(dict(CFBundleExecutable='StudioLocal',CFBundleIdentifier=sys.argv[2],CFBundleName=sys.argv[3],CFBundleIconFile='StudioIcon.icns',CFBundlePackageType='APPL',CFBundleVersion='28',CFBundleShortVersionString='1.15.1',NSHighResolutionCapable=True),f)
 PY
 /usr/bin/codesign --force --sign - "$bundle"
 /usr/bin/codesign --verify --deep --strict "$bundle"

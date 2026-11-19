@@ -43,12 +43,17 @@ class AudioContext{constructor(){Object.assign(this,{state:starts,currentTime:0,
   createGain:node,createBufferSource:node,createConstantSource:node});devices.push(this);}}
 class AudioWorkletNode{constructor(context,name,options){this.rate=options.parameterData.playbackRate;this.port={postMessage(){}};processors.push(this);}connect(){}}
 class OfflineAudioContext{decodeAudioData(){return Promise.resolve({length:1,numberOfChannels:1});}}
-const sandbox={console,setTimeout,clearTimeout,queueMicrotask,AbortController,fetch,VideoDecoder,AudioContext,AudioWorkletNode,OfflineAudioContext,EncodedVideoChunk:class{constructor(x){Object.assign(this,x);}},
+// Pictures: the test chooses which fail and counts how many load at once.
+const imageFails=new Map();let imagesOpen=0,imagesMax=0;
+class Image{
+  decode(){imagesOpen++;imagesMax=Math.max(imagesMax,imagesOpen);
+    return sleep(5).then(()=>{imagesOpen--;if(imageFails.get(this.src)>0){imageFails.set(this.src,imageFails.get(this.src)-1);throw Error('Loading error.');}this.naturalWidth=120;});}}
+const sandbox={console,setTimeout,clearTimeout,queueMicrotask,AbortController,fetch,VideoDecoder,AudioContext,AudioWorkletNode,OfflineAudioContext,Image,EncodedVideoChunk:class{constructor(x){Object.assign(this,x);}},
   performance:{now:()=>performance.now()+offset},requestAnimationFrame(){},cancelAnimationFrame(){},
   document:{createElement:()=>({style:{},hidden:true,getContext:()=>({fillRect(){},save(){},restore(){},drawImage:(source,...at)=>{if(nodraw)throw TypeError('not drawable');drawn.push(source);if(at.length===8&&source.displayWidth)cropped.push(source);}})})}};
 vm.createContext(sandbox);
 const code=fs.readFileSync(path.join(__dirname,'../mobile/direct-player.js'),'utf8').replace(/export /g,'');
-vm.runInContext(code+'\nObject.assign(this,{DirectPlayer,Media,Reader,sampleTable,audioLevel,envelopePoints});',sandbox);
+vm.runInContext(code+'\nObject.assign(this,{DirectPlayer,Media,Reader,sampleTable,audioLevel,envelopePoints,meter});',sandbox);
 (async()=>{
  // The index of a real proxy.
  const table=sandbox.sampleTable(proxy),{samples}=table;
@@ -58,7 +63,7 @@ vm.runInContext(code+'\nObject.assign(this,{DirectPlayer,Media,Reader,sampleTabl
  assert.equal(sandbox.sampleTable(proxy.subarray(0,300)),null,'no index until all of it has arrived');
  // A proxy downloads from the first sample wanted, and again from an earlier one when that is asked for.
  for(let i=0;i<6;i++){files.set(`/v${i}.mp4`,proxy);files.set(`/a${i}.m4a`,new Uint8Array(8));}
- const net={bytes:0,ms:0,skips:0,start(){},end(){}};let gone=0;
+ const net={bytes:0,ms:0,skips:0,asked:()=>()=>{},start(){},end(){}};let gone=0;
  let media=new sandbox.Media('/v0.mp4',0,net,()=>gone++);await until(()=>media.done);
  assert.deepEqual(requests,['/v0.mp4']);assert.ok(media.have(0)&&media.have(299));assert.equal(net.bytes,proxy.length);
  requests.length=0;const middle=new sandbox.Media('/v0.mp4',7.2,net,()=>gone++);await until(()=>middle.done);
@@ -67,6 +72,9 @@ vm.runInContext(code+'\nObject.assign(this,{DirectPlayer,Media,Reader,sampleTabl
  requests.length=0;latency=40;middle.reach(3);const asking=setInterval(()=>middle.reach(3),5);await until(()=>middle.done);clearInterval(asking);latency=0;
  assert.deepEqual(requests,[`/v0.mp4 bytes=${samples[90].at}-`],'asked again while the answer is on its way, it is one download');assert.ok(middle.have(90)&&middle.have(299));
  const missing=new sandbox.Media('/none.mp4',0,net,()=>gone++);await until(()=>missing.error);assert.equal(gone,1,'a proxy the Mac no longer has is asked of it again');
+ // The rate of a link is what it carries while an answer arrives; the time the Mac takes to begin answering is apart.
+ const link=sandbox.meter();latency=150;const answered=new sandbox.Media('/v0.mp4',0,link,()=>{});await until(()=>answered.done);latency=0;
+ assert.ok(link.ttfb()>=140,'the wait for an answer is measured');assert.ok(link.ms<100,'and is not counted as time carrying data');
  // Decoding: the exact frame although the decoder keeps some back; forwards it goes on, backwards it starts at the key frame.
  const reader=new sandbox.Reader(media,net),show=async time=>{for(let n=0;n<200;n++){reader.at(time,0);if(!reader.late)return reader.frames[0].i;await sleep(1);}assert.fail('never shown');};
  assert.equal(await show(1.2),36);assert.equal(fed[0],1e6,'decoding starts at the key frame before');
@@ -108,15 +116,21 @@ vm.runInContext(code+'\nObject.assign(this,{DirectPlayer,Media,Reader,sampleTabl
  assert.equal(logs.filter(x=>x.event==='wait').length,0);assert.equal(p.playing,true);
  // Only a picture that is late and not moving stops the clock, and the log says whether the link or the decoder owed it.
  // It then plays on by itself, once four seconds of watching are on the phone; a link that does not carry the sharp picture gets the light one.
- const waits=()=>logs.filter(x=>x.event==='wait').map(x=>x.why);
- p.media.get('/v2.mp4').abort();p.media.delete('/v2.mp4');limit.set('/v2.mp4',samples[30].at);clock(590);await sleep(30);clock(645);offset+=300;clock(645);
- assert.deepEqual({...logs.at(-2)},{event:'wait',why:'download',frame:645});assert.equal(logs.at(-1).event,'played');
- await sleep(60);assert.equal(p.playing,false);assert.equal(asked.filter(x=>x.action==='directPlan').at(-1).size,640);limit.delete('/v2.mp4');await sleep(80);assert.equal(p.playing,true);
- p.audio.set('/a3.m4a',{});silent=true;clock(890);await sleep(30);clock(905);offset+=300;clock(905);assert.deepEqual(waits(),['download','decode']);
+ // A link whose rate carries the sharp picture keeps it after a wait; one whose rate does not gets the light one.
+ const waits=()=>logs.filter(x=>x.event==='wait').map(x=>x.why),sizes=()=>asked.filter(x=>x.action==='directPlan').at(-1).size;
+ const stall=async (sample,frame)=>{p.media.get('/v2.mp4')?.abort();p.media.delete('/v2.mp4');limit.set('/v2.mp4',samples[sample].at);clock(frame-55);await sleep(30);clock(frame);offset+=300;clock(frame);};
+ await stall(30,645);
+ assert.deepEqual({...logs.at(-2),kbps:0,ttfb:0},{event:'wait',why:'download',frame:645,kbps:0,ttfb:0,need:2096});assert.equal(logs.at(-1).event,'played');
+ assert.ok(logs.at(-2).kbps>2096*1.25,'the log says what the link carried');
+ await sleep(60);assert.equal(p.playing,false);assert.equal(sizes(),1280,'a wait on a fast link keeps the sharp picture');limit.delete('/v2.mp4');await sleep(80);assert.equal(p.playing,true);
+ const rate=p.net.kbps;p.net.kbps=()=>1500;await stall(120,745);p.net.kbps=rate;
+ assert.equal(logs.find(x=>x.event==='quality').kbps,1500);await sleep(60);assert.equal(sizes(),640,'a slow one gets the light one');
+ limit.delete('/v2.mp4');await sleep(80);assert.equal(p.playing,true);
+ p.audio.set('/a3.m4a',{});silent=true;clock(890);await sleep(30);clock(905);offset+=300;clock(905);assert.deepEqual(waits(),['download','download','decode']);
  silent=false;await sleep(60);assert.equal(p.playing,true);silent=true;
  const slow=p.readers.get('base:c:3');for(const {frame} of slow.frames.splice(0))frame.close();
  for(const i of [20,21,22]){slow.frames=[{i,frame:{displayWidth:160,displayHeight:90,close(){}}}];offset+=300;clock(930);}
- assert.equal(waits().length,2,'late but moving, it catches up by itself');silent=false;
+ assert.equal(waits().length,3,'late but moving, it catches up by itself');silent=false;
  p.stop();assert.equal(logs.at(-1).event,'played');assert.equal(logs.at(-1).late,10,'how far the picture trailed is in the log');
  // Read-ahead: what twenty seconds of watching use downloads one at a time, the sound first, then the pictures from the one on screen.
  p.release();assert.equal(closed,1,'leaving the montage ends its sound device');requests.length=0;p.frame=240;p.prefetch();await sleep(80);
@@ -178,5 +192,23 @@ vm.runInContext(code+'\nObject.assign(this,{DirectPlayer,Media,Reader,sampleTabl
  hook.props.exit=undefined;p.draw();assert.ok(p.ctx.globalAlpha<.08,'plain titles keep their exit');
  hook.props.exit='cut';hook.props.opacity=.4;p.draw();assert.equal(p.ctx.globalAlpha,.4,'explicit opacity stays editable');
  const count=drawn.length;p.frame=90;p.draw();assert.equal(drawn.length,count,'nothing from the title is drawn after its boundary');
- console.log('PASS · direct player: proxy index, a tap on a text, download from the middle, decoding, seeks, cuts, waits, read-ahead, sound, fallback');
+ p.canvas.toDataURL=type=>'data:'+type;p.canvas.hidden=false;assert.equal(p.still(90),'data:image/jpeg','the picture on screen, for a new note');assert.equal(p.still(89),undefined,'not another frame');
+ // Texts and pictures download as far ahead as the video, four at a time; the ones kept are the ones to be seen, and
+ // one that does not arrive is asked for again instead of stopping the picture.
+ const texts=Array.from({length:40},(_,i)=>({id:'t'+i,kind:'text',start:i*30,length:30,url:`/t${i}.png`,rect:[0,0,10,10],props:{}}));
+ const q=new sandbox.DirectPlayer({append(){}},async req=>req.action==='directPlan'?{...plan(1280),layers:texts}:{ready:req.urls,failed:[]},()=>{},()=>{},e=>errors.push(e),()=>{});
+ errors.length=0;imageFails.set('/t0.png',1);imagesMax=0;
+ await q.load({id:'Q',revision:1},0);await q.seek(0);
+ assert.equal(errors.length,0,'a text that failed once is asked for again');assert.ok(q.images.get('/t0.png').image,'and shown');
+ await until(()=>[...q.images.values()].every(x=>x.image));
+ assert.deepEqual([...q.images.keys()].sort(),texts.filter(x=>x.start<=600).map(x=>x.url).sort(),'the texts of the next twenty seconds');
+ assert.ok(imagesMax<=4,'four at a time');
+ q.net.start();q.image('/far.png');assert.ok(!q.images.get('/far.png').busy,'while a video or sound is on its way a far one waits');
+ q.image('/near.png',true);assert.ok(q.images.get('/near.png').busy,'one to be seen soon does not');
+ q.net.end();assert.ok(q.images.get('/far.png').busy,'and the far one goes once the link is free');
+ // Playing on after a wait also waits for the texts of its next seconds, which do not wait behind the video.
+ q.frame=600;q.prefetch();q.net.start();const resumed=q.prepare(800,q.generation,false,'image');
+ await until(()=>q.images.get('/t28.png')?.image);q.net.end();await resumed;
+ q.frame=900;q.prefetch();assert.ok(!q.images.has('/t0.png')&&q.images.has('/t30.png'),'one no longer to be seen is let go');q.release();
+ console.log('PASS · direct player: proxy index, a tap on a text, download from the middle, decoding, seeks, cuts, waits, link rate, read-ahead of video and texts, sound, fallback');
 })().catch(e=>{console.error(e);process.exitCode=1});

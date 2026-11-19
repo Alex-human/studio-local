@@ -148,6 +148,7 @@ def image_layers(p,motion=False):
             keyframes={key:sorted(copy.deepcopy(points),key=lambda point:point['frame']) for key,points in g.get('keyframes',{}).items()}))
     return result
 
+RECTS={}  # sprite -> its rectangle; a sprite's name is the digest of what it draws
 def text_layer(item,kind,size,cache):
     """Cache only static glyph pixels; timing, fades and keyframes stay editable."""
     props={k:v for k,v in item.get('props',{}).items() if k not in ('enter','opacity')}
@@ -155,9 +156,11 @@ def text_layer(item,kind,size,cache):
     path=cache/f'text-{digest(dict(version=CACHE_VERSION,size=size,**content))}.png'
     rect=None
     if path.exists():
-        try:
-            with Image.open(path) as source:rect=json.loads(source.info['rect'])
-        except (OSError,KeyError,ValueError):pass
+        rect=list(RECTS[path]) if path in RECTS else None
+        if rect is None:
+            try:
+                with Image.open(path) as source:rect=json.loads(source.info['rect'])
+            except (OSError,KeyError,ValueError):pass
     if rect is None:
         sprite,rect=graphics.text_sprite(size,**content)
         metadata=PngImagePlugin.PngInfo();metadata.add_text('rect',json.dumps(rect,separators=(',',':')))
@@ -166,6 +169,7 @@ def text_layer(item,kind,size,cache):
             sprite.save(temp_path,format='PNG',pnginfo=metadata)
             os.replace(temp_path,path)
         finally:temp_path.unlink(missing_ok=True)
+    RECTS[path]=tuple(rect)
     animation=dict(animation='none') if kind=='captions' else dict(enter=item.get('props',{}).get('enter',.45),opacity=item.get('props',{}).get('opacity',1))
     if kind!='captions' and props.get('style')=='native':animation['exit']='cut'
     return dict(kind='text',path=str(path),start=item['start'],length=item['length'],offset=item.get('offset',0),

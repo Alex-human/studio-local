@@ -15,7 +15,7 @@ function node(id='') {
   return n;
 }
 const context = {assert,console,structuredClone,crypto:require('node:crypto').webcrypto,setInterval(){},setTimeout(){},clearTimeout(){},setImmediate,queueMicrotask,
-  performance,AbortController,DirectPlayer:class {constructor(...args){this.args=args} release(){this.released=(this.released||0)+1} load(){return Promise.resolve(true)} seek(){} stop(){}},devicePixelRatio:1,navigator:{userAgent:'test'},document:{hidden:false,getElementById:node,createElement:()=>node(),
+  performance,AbortController,DirectPlayer:class {constructor(...args){this.args=args} release(){this.released=(this.released||0)+1} load(){return Promise.resolve(true)} seek(){} stop(){} still(frame){return frame===this.shown?'data:image/jpeg;base64,AA':undefined}},devicePixelRatio:1,navigator:{userAgent:'test'},document:{hidden:false,getElementById:node,createElement:()=>node(),
     querySelector(){return null},querySelectorAll(selector){return selector.includes('dialog textarea') ? [node('noteText'),node('hookText')] : []},addEventListener(){}},
   window:{events:{},addEventListener(type,fn){(this.events[type]??=[]).push(fn)},removeEventListener(type,fn){this.events[type]=(this.events[type]||[]).filter(x=>x!==fn)}},localStorage:{setItem:(k,v)=>memory.set(k,v),getItem:k=>memory.get(k),removeItem:k=>memory.delete(k)}};
 vm.createContext(context);
@@ -108,6 +108,11 @@ code+=`
   assert.equal(noteDraft.text,'Unsaved changes');assert.equal(noteDraft.version,2);assert.equal($('loadSavedNote').hidden,false);
   query=async()=>({notes:[{...saved,version:3,text:'Someone else'}]});await $('loadSavedNote').onclick();
   assert.equal(noteDraft.text,'Someone else');assert.equal(noteDraft.version,3);
+  // A new note on the frame on screen shows that picture at once, without asking the Mac to render it.
+  localStorage.removeItem(draftKey('P'));$('noteDialog').close();await new Promise(setImmediate);localStorage.removeItem(draftKey('P'));
+  noteDraft=null;frame=42;direct.shown=42;openNote();assert.equal($('noteImage').src,'data:image/jpeg;base64,AA');
+  localStorage.removeItem(draftKey('P'));$('noteDialog').close();await new Promise(setImmediate);localStorage.removeItem(draftKey('P'));
+  noteDraft=null;frame=43;openNote();assert.equal($('noteImage').src,'/media/P/1/43.jpg','another frame is rendered by the Mac');
   noteDraft=null;localStorage.removeItem(draftKey('P'));$('noteDialog').close();
   $('hook').onclick();$('textChoices').children[0].onclick();$('hookText').value='Unsent hook';$('hookText').oninput();$('textDialog').close();
   await new Promise(setImmediate);$('hook').onclick();

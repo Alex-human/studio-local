@@ -115,7 +115,7 @@ def dispatch(path,p,req):
         if note['capture']=='ready' and (folder/'frame.png').exists():return describe(path,p,note)
         snapshot=project.load(folder/'snapshot.studio')
         try:
-            result=render.frame(snapshot,note['frame'],folder,width=min(snapshot['width'],1920),timeout=30)
+            result=render.frame(snapshot,note['frame'],folder,width=round(snapshot['width']*min(1,1280/max(snapshot['width'],snapshot['height']))/2)*2,timeout=30)
             with Image.open(result['path']) as im:save_png(im.convert('RGB'),folder/'frame.png')
             with database(path,True) as db:
                 note=get(db,id,p['id']);annotate(folder,note['strokes']);note['capture']='ready';put(db,note)
@@ -140,7 +140,6 @@ def dispatch(path,p,req):
         redraw='strokes' in values and (values['strokes']!=note['strokes'] or not (folder/'annotated.png').exists())
         note.update(values)
         if note['status'] in ('open','resolved') and (not note['text'].strip() and not note['strokes']):raise ValueError('Escribe un comentario o dibuja una indicación')
-        if note['status'] in ('open','resolved') and note['capture']!='ready':raise ValueError('Espera a que esté lista la captura antes de guardar')
         if redraw:annotate(folder,note['strokes'])
         note['version']+=1;note['updatedAt']=time.time();put(db,note)
     return describe(path,p,note)

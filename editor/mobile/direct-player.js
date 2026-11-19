@@ -39,11 +39,16 @@ export function envelopePoints(item,from,end) {
   return result;
 }
 const video = item => item.base||item.type==='video';
-// What the link carried and for how long some download was running: its real rate, however many share it.
-const meter = () => ({bytes:0,ms:0,skips:0,running:0,
+// What the link carried while some answer was arriving: its real rate, however many share it. The time the Mac takes
+// to begin an answer is apart (ttfb, the median of the last twenty): a slow answer is not a slow link.
+const meter = () => ({bytes:0,ms:0,skips:0,running:0,waits:[],
+  asked() {const at=performance.now();return ()=>{this.waits.push(performance.now()-at);if(this.waits.length>20)this.waits.shift();};},
   start() {if(!this.running++)this.since=performance.now();},
-  end() {if(!--this.running)this.ms+=performance.now()-this.since;},
-  kbps() {return Math.round(this.bytes*8/(this.ms+(this.running?performance.now()-this.since:0)))||undefined;}});
+  end() {if(!--this.running){this.ms+=performance.now()-this.since;this.idle?.();}},
+  kbps() {return Math.round(this.bytes*8/(this.ms+(this.running?performance.now()-this.since:0)))||undefined;},
+  ttfb() {const waits=[...this.waits].sort((a,b)=>a-b);return waits.length?Math.round(waits[waits.length>>1]):undefined;}});
+// What playing a second of the sharp picture takes, in kb/s: its video and its sound.
+const SHARP=2096;
 // What the speed processor holds: sound comes out of it this long after going in (measured at every speed, at 44.1 and 48 kHz).
 const STRETCH=.037;
 const undecodable = () => Object.assign(new Error('Este navegador no ha podido descodificar el vídeo: se usa la previsualización compuesta.'),{name:'EncodingError'});
@@ -88,9 +93,10 @@ class Media {
   constructor(url,time,net,gone) {Object.assign(this,{url,time,net,gone});this.read(0);}
   async read(from) {
     this.control?.abort();this.done=false;this.lo=this.hi=from;  // At once: asking again for the same place does not start it again.
-    const control=this.control=new AbortController();let timer;this.net.start();
+    const control=this.control=new AbortController(),answered=this.net.asked();let timer,arriving=false;
     try {
       const response=await fetch(this.url,{signal:control.signal,headers:from?{Range:`bytes=${from}-`}:{}});
+      answered();this.net.start();arriving=true;
       if(!response.ok){this.gone();throw new Error('No se pudo cargar un medio del proyecto.');}
       this.bytes??=new Uint8Array(Number(response.headers.get('Content-Length')));
       for(const body=response.body.getReader();;) {
@@ -109,7 +115,7 @@ class Media {
       this.done=true;
     } catch(e) {
       if(control===this.control)this.error=e.name==='AbortError'?new Error('La conexión no ha entregado un medio a tiempo. Vuelve a pulsar reproducir.'):e;
-    } finally {clearTimeout(timer);this.net.end();}
+    } finally {clearTimeout(timer);if(arriving)this.net.end();}
   }
   // A moment before what is arriving begins the download again from its key frame.
   reach(time) {
@@ -167,6 +173,7 @@ export class DirectPlayer {
   constructor(viewer,query,onFrame,onState,onError,log=()=>{}) {
     Object.assign(this,{query,onFrame,onState,onError,log,frame:0,rate:1,generation:0,playing:false,net:meter()});
     this.readers=new Map();this.media=new Map();this.images=new Map();this.audio=new Map();this.pending=new Map();this.raw=new Map();this.ready=new Set();this.sources=new Map();
+    this.loading=[];this.loads=0;this.net.idle=()=>this.pictures();
     this.canvas=document.createElement('canvas');this.canvas.id='composition';this.canvas.hidden=true;viewer.append(this.canvas);
     this.ctx=this.canvas.getContext('2d',{alpha:false});
   }
@@ -256,16 +263,38 @@ export class DirectPlayer {
     if(reader?.media!==media){reader?.close();this.readers.set(key,reader=new Reader(media,this.net));}
     return reader;
   }
+  // A text or a picture, each a file of its own: four download at a time, in the order they are asked for, those to be
+  // seen soon first; the others only while no video or sound is on its way, which on a slow link would wait behind
+  // them. One that does not arrive or decode is asked for again before anyone is told.
+  image(url,soon) {
+    let entry=this.images.get(url);
+    if(!entry) {
+      entry={tries:0};entry.promise=new Promise((resolve,reject)=>Object.assign(entry,{resolve,reject}));entry.promise.catch(()=>{});
+      this.images.set(url,entry);this.loading.push(url);
+    }
+    if(soon&&!entry.soon){entry.soon=true;if(!entry.busy)this.loading.unshift(url);}
+    this.pictures();
+    return entry.promise;
+  }
+  pictures() {
+    while(this.loads<4) {
+      const at=this.loading.findIndex(url=>this.images.get(url)?.soon||!this.net.running);
+      if(at<0)return;
+      const url=this.loading.splice(at,1)[0],entry=this.images.get(url);
+      if(!entry||entry.busy)continue;
+      entry.busy=true;this.loads++;const image=new Image();image.src=url;
+      image.decode().then(()=>{entry.image=image;entry.resolve(image);},e=>{
+        entry.busy=false;
+        if(this.images.get(url)===entry&&++entry.tries<3)return void setTimeout(()=>{if(this.images.get(url)===entry){this.loading.unshift(url);this.pictures();}},400*entry.tries);
+        if(this.images.get(url)===entry)this.images.delete(url);
+        entry.reject(e);
+      }).finally(()=>{this.loads--;this.pictures();});
+    }
+  }
   // The exact frame of an item, decoded.
   async picture(item,frame,generation=this.generation) {
     if(generation!==this.generation||!this.plan)return null;
-    if(!video(item)) {
-      if(!this.images.has(item.url)) {
-        const image=new Image();image.src=item.url;
-        const promise=image.decode().then(()=>image).catch(e=>{this.images.delete(item.url);throw e;});this.images.set(item.url,{image,promise});
-      }
-      return this.images.get(item.url).promise;
-    }
+    if(!video(item))return this.image(item.url,true);
     const reader=this.reader(item,frame,true),time=this.sourceTime(item,frame),deadline=performance.now()+20000;
     for(let owed;;) {
       if(reader.media.error)throw reader.media.error;
@@ -292,14 +321,15 @@ export class DirectPlayer {
   // Sound downloads as soon as its place is near; decoding waits for the audio context the first tap creates.
   bytes(url) {
     if(this.raw.has(url))return this.raw.get(url).promise;
-    const control=new AbortController(),timer=setTimeout(()=>control.abort(),20000),entry={abort:()=>control.abort()};this.net.start();
+    const control=new AbortController(),timer=setTimeout(()=>control.abort(),20000),entry={abort:()=>control.abort()},answered=this.net.asked();let arriving=false;
     entry.promise=fetch(url,{signal:control.signal}).then(async response=>{
+      answered();this.net.start();arriving=true;
       if(!response.ok){this.ready.delete(url);throw new Error('No se pudo cargar un medio del proyecto.');}
       const data=await response.arrayBuffer();this.net.bytes+=data.byteLength;return data;
     }).catch(e=>{
       if(this.raw.get(url)===entry)this.raw.delete(url);
       throw e.name==='AbortError'?new Error('La conexión no ha entregado un medio a tiempo. Vuelve a pulsar reproducir.'):e;
-    }).finally(()=>{clearTimeout(timer);this.net.end();});
+    }).finally(()=>{clearTimeout(timer);if(arriving)this.net.end();});
     entry.promise.catch(()=>{});this.raw.set(url,entry);return entry.promise;
   }
   // Leaves what the place being watched will not use: downloads on their way are given up, what is here is freed.
@@ -328,11 +358,11 @@ export class DirectPlayer {
   // on the phone, not with the next frame alone.
   async prepare(frame,generation,audio=true,why) {
     const fps=this.plan.fps,lead=(why?4:2)*this.rate,visual=this.visual(frame),audible=audio?this.audible(frame/fps,lead):[];
-    const cushion=why?this.visual(frame,lead).filter(video):[];
+    const cushion=why?this.visual(frame,lead):[];
     this.forget(frame);
     await this.ensure([...visual,...audible,...cushion].map(x=>x.url),generation,this.ahead(frame));
     if(generation!==this.generation)return;
-    await Promise.all([...cushion.map(x=>this.arrived(x,frame,frame+lead*fps,generation)),...visual.map(item=>this.picture(item,frame,generation))]);
+    await Promise.all([...cushion.map(x=>video(x)?this.arrived(x,frame,frame+lead*fps,generation):this.image(x.url,true)),...visual.map(item=>this.picture(item,frame,generation))]);
     if(audio)await Promise.all(audible.map(x=>this.buffer(x.url)));
     if(generation!==this.generation)return;
     this.frame=frame;this.draw();
@@ -395,7 +425,7 @@ export class DirectPlayer {
       // The clock starts when the sound is heard: after what played before has left, and after the processor's delay.
       this.anchorFrame=frame;this.anchorTime=Math.max(now+.025,this.settled)+this.delay;this.playing=true;
       this.bus.gain.setValueAtTime(0,this.anchorTime-this.delay);this.bus.gain.linearRampToValueAtTime(1,this.anchorTime-this.delay+.02);
-      this.run={from:Math.round(frame),rate,why,ms:took(),unlock:unlocked,prepare:took()-unlocked,kbps:this.net.kbps(),at:performance.now(),late:0,skips:this.net.skips,
+      this.run={from:Math.round(frame),rate,why,ms:took(),unlock:unlocked,prepare:took()-unlocked,kbps:this.net.kbps(),ttfb:this.net.ttfb(),at:performance.now(),late:0,skips:this.net.skips,
         hz:context.sampleRate,out:Math.round(((context.baseLatency||0)+(context.outputLatency||0))*1000)};
       this.schedule();this.onState(true,false);this.tick();this.prefetch();
     } catch(e) {if(generation===this.generation){this.stop();this.fail(e,'play');}}
@@ -421,15 +451,16 @@ export class DirectPlayer {
       source.onended=()=>{source.disconnect();gain.disconnect();source.buffer=null;if(this.sources.get(key)===source)this.sources.delete(key);};this.sources.set(key,source);
     }
   }
-  // Downloads what twenty seconds of watching use.
+  // Downloads what twenty seconds of watching use; texts and pictures, which are small, alongside.
   prefetch() {
     if(!this.plan)return;
     const generation=this.generation,frame=this.frame,fps=this.plan.fps,reach=20*this.rate;
     const near=this.visual(frame,4),keys=new Set(near.map(x=>this.key(x)));
     for(const [key,reader] of this.readers)if(!keys.has(key)){reader.close();this.readers.delete(key);}
-    const imageURLs=new Set(near.map(x=>x.url));
-    for(const url of this.images.keys())if(this.images.size>48&&!imageURLs.has(url))this.images.delete(url);
-    for(const x of near)if(x.start>frame&&!video(x))this.picture(x,x.start,generation).catch(()=>{});
+    const upcoming=this.visual(frame,reach).filter(x=>!video(x)).sort((a,b)=>a.start-b.start),kept=new Set(upcoming.map(x=>x.url));
+    for(const [url,entry] of this.images)if(!kept.has(url)){this.images.delete(url);entry.reject(new Error('Fuera de lo que se va a ver'));}
+    this.loading=this.loading.filter(url=>kept.has(url));
+    for(const x of upcoming)this.image(x.url,x.start<=frame+4*this.rate*fps);
     if(this.prefetching===generation)return;
     // One at a time, so that each has the whole link: the sound, which is small, then the pictures from the one on screen.
     const queue=[...this.audible(frame/fps,reach),...this.visual(frame,reach).filter(video)];
@@ -454,7 +485,7 @@ export class DirectPlayer {
       for(const item of this.visual(this.frame,1.5*this.rate)) {
         const soon=item.start>this.frame;
         if(!this.ready.has(item.url)){if(!soon)missing||='pending';continue;}
-        if(!video(item)){if(!soon&&!this.images.get(item.url)?.image.naturalWidth)missing||='image';continue;}
+        if(!video(item)){if(!soon&&!this.images.get(item.url)?.image?.naturalWidth)missing||='image';continue;}
         const reader=this.reader(item,this.frame);
         if(reader.media.error){if(!soon)missing||='download';continue;}
         reader.at(this.sourceTime(item,Math.max(this.frame,item.start)),soon?0:.12*this.rate);
@@ -468,12 +499,13 @@ export class DirectPlayer {
       if(!missing)this.draw();
     } catch(e){this.stop();this.fail(e,'decode');return;}
     if(missing) {
-      this.log('wait',{why:missing,frame:Math.round(this.frame)});
+      const link=missing==='download'?{kbps:this.net.kbps(),ttfb:this.net.ttfb(),need:Math.round(SHARP*this.rate)}:{};
+      this.log('wait',{why:missing,frame:Math.round(this.frame),...link});
       // A decoder that stopped giving frames is replaced.
       if(missing==='decode')for(const reader of this.readers.values())reader.close();
-      // A link that does not carry the sharp picture gets the light one for the rest of the visit.
-      if(missing!=='download'||this.size!==1280)return void this.play(this.frame,this.rate,missing);
-      this.slow=true;this.halt();this.onState(true,true);
+      // A link whose rate does not carry the sharp picture gets the light one for the rest of the visit.
+      if(missing!=='download'||this.size!==1280||!(link.kbps<link.need*1.25))return void this.play(this.frame,this.rate,missing);
+      this.log('quality',{size:640,...link});this.slow=true;this.halt();this.onState(true,true);
       this.replan().then(ok=>ok&&this.play(this.frame,this.rate,missing)).catch(e=>{this.stop();this.fail(e,'play');});
       return;
     }
@@ -482,6 +514,8 @@ export class DirectPlayer {
     if(!this.lastPrefetch||performance.now()-this.lastPrefetch>1000){this.lastPrefetch=performance.now();this.prefetch();}
     this.raf=requestAnimationFrame(()=>this.tick());
   }
+  // The picture on screen as an image, when it is that frame of the montage.
+  still(frame) {return this.plan&&!this.canvas.hidden&&this.shown===frame?this.canvas.toDataURL('image/jpeg',.9):undefined;}
   draw() {
     if(!this.plan)return;
     const visible=this.visual().map(item=>[item,video(item)?this.readers.get(this.key(item))?.frames[0]?.frame:this.images.get(item.url)?.image]);
@@ -524,6 +558,7 @@ export class DirectPlayer {
       }
       ctx.restore();
     }} catch {throw undecodable();}
+    this.shown=Math.round(this.frame);
   }
   release() {
     this.stop();for(const reader of this.readers.values())reader.close();this.readers.clear();

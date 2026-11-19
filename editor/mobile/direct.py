@@ -19,6 +19,7 @@ import project
 import render
 
 CHUNK, BLOCK = 10, 10  # Source seconds per video proxy and per audio block.
+LIMIT = 6*1024**3
 
 
 def transcode(args, seconds):
@@ -63,6 +64,8 @@ class DirectMedia:
         self.active = set()
         self.background = False
         self.workers = 0
+        self.used = {}  # name -> last time a plan or the phone asked for it
+        self.size = None  # bytes in the folder at its last listing plus what was built since
 
     def resource(self, asset, color=None, audio=False, start=0, size=640):
         source = Path(asset['path'])
@@ -123,7 +126,7 @@ class DirectMedia:
                 with self.lock:
                     self.active.discard(name)
                     if tier:self.background=False
-            self.prune()
+            self.prune(name)
 
     def build(self, name, spec):
         dest = self.folder/name
@@ -167,21 +170,31 @@ class DirectMedia:
                         transcode(['-y','-v','error',*source,'-vf',','.join(filters),*output],CHUNK)
             os.replace(out, dest)
 
-    def prune(self):
-        """Above 6 GiB the longest unused go first; nothing used in the last two minutes."""
+    def prune(self, built=None):
+        """Above 6 GiB the longest unused go first; nothing used in the last two minutes. The folder (some 20.000 files)
+        is listed again only once what was built since its last listing may have taken it past that."""
         try:
-            files=sorted((f.stat().st_mtime,f.stat().st_size,f.path) for f in os.scandir(self.folder) if f.is_file() and f.name.endswith(('.mp4','.m4a','.png','.wav')))
+            with self.lock:
+                if built and self.size is not None:self.size+=(self.folder/built).stat().st_size
+                if self.size is not None and self.size<=LIMIT:return
+            now=time.time()
+            files=sorted((max(f.stat().st_mtime,self.used.get(f.name,0)),f.stat().st_size,f.path) for f in os.scandir(self.folder) if f.is_file() and f.name.endswith(('.mp4','.m4a','.png','.wav')))
             total=sum(size for _,size,_ in files)
-            for modified,size,path in files:
-                if total<=6*1024**3 or time.time()-modified<120:break
+            for used,size,path in files:
+                if total<=LIMIT or now-used<120:break
                 total-=size;os.unlink(path)
+            self.size=total
         except OSError:pass  # A file vanished meanwhile; the next build prunes again.
 
     def missing(self, urls):
-        """Mark what exists as just used and return the rest."""
-        result=[]
+        """Mark what exists as just used and return the rest. The use is kept in memory; the file's time, which outlives
+        the process, is set when it is more than a minute old: a time for each of a plan's hundreds of files is slow."""
+        result,now=[],time.time()
         for url in dict.fromkeys(urls):
-            try:os.utime(self.folder/url.removeprefix('/native/'))
+            name=url.removeprefix('/native/')
+            try:
+                if now-os.stat(self.folder/name).st_mtime>60:os.utime(self.folder/name)
+                self.used[name]=now
             except OSError:result.append(url)
         return result
 

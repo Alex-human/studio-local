@@ -79,6 +79,15 @@ class InstagramHookTests(unittest.TestCase):
         for props in (props,{**props,'text':'Escribe aquí\ntu gancho','color':'#ffffff','accent':'#000000','y':1003}):
             sprite,rect=graphics.text_sprite(size,props);actual=Image.new('RGBA',size);actual.alpha_composite(sprite,tuple(rect[:2]))
             np.testing.assert_array_equal(np.asarray(graphics.title_layer(size,props)),np.asarray(actual))
+    def test_native_hook_draws_emoji_in_colour(self):
+        size=(1080,1920);props=dict(text='Instagram, reúne a todos los emprendedores de Bali 🥥',style='native',x=960,y=568,size=114,color='#000000',accent='#ffffff')
+        layer=np.asarray(graphics.title_layer(size,props)).astype(int)
+        coloured=(layer[:,:,3]==255)&(np.ptp(layer[:,:,:3],axis=2)>60)  # the coconut's browns; a box glyph is black
+        self.assertGreater(coloured.sum(),300)
+        _,rows,card,_=graphics.native_hook_parts(props['text'],540,568*1080/1920,114*1080/1920,1080*.9)
+        ys,xs=np.nonzero(coloured);self.assertTrue(card[0]<xs.min() and xs.max()<card[2] and card[1]<ys.min() and ys.max()<card[3])
+        sprite,rect=graphics.text_sprite(size,props);actual=Image.new('RGBA',size);actual.alpha_composite(sprite,tuple(rect[:2]))
+        np.testing.assert_array_equal(np.asarray(graphics.title_layer(size,props)),np.asarray(actual))
     def test_weight_and_style_validation(self):
         for values in [{'weight':999},{'style':'unknown'},{'box':'sí'}]:
             p=copy.deepcopy(self.p);p['graphics'][0]['props'].update(values)

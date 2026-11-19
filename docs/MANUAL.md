@@ -53,7 +53,7 @@ Pulsa **⌘F** mientras revisas: Studio pausa en el fotograma actual y abre **¿
 
 El texto se autoguarda como borrador mientras escribes, aunque la captura siga preparándose. Cerrar conserva el borrador; un error de escritura mantiene el diálogo abierto con el texto y permite reintentar. Si otra sesión modificó la misma nota, muestra el conflicto sin sobrescribirla; **Descartar mi intento y cargar nota guardada** recupera explícitamente la versión persistida. El cierre normal guarda el borrador y su sesión; una actualización espera a que cierres el diálogo. Los atajos de corte y pegado de imágenes no actúan detrás del diálogo y ⌘V conserva el pegado de texto.
 
-Cada proyecto conserva `feedback/feedback.sqlite3` y una carpeta por nota con `snapshot.studio` (revisión original), `frame.png` (captura limpia de hasta1920px) y `annotated.png` (dibujo sobre esa captura). Son material de revisión, **no caché desechable**. Comentar no cambia el montaje ni su revisión y no altera la exportación. El marcador sigue al fotograma fuente cuando un corte lo desplaza; si se eliminó o su nueva posición es ambigua, la lista avisa y mantiene la captura original.
+Cada proyecto conserva `feedback/feedback.sqlite3` y una carpeta por nota con `snapshot.studio` (revisión original), `frame.png` (captura limpia a 720p: lado mayor de hasta 1280 px, sin ampliar un montaje menor) y `annotated.png` (dibujo sobre esa captura). Son material de revisión, **no caché desechable**. Comentar no cambia el montaje ni su revisión y no altera la exportación. El marcador sigue al fotograma fuente cuando un corte lo desplaza; si se eliminó o su nueva posición es ambigua, la lista avisa y mantiene la captura original.
 
 ### Leer y aplicar feedback por CLI/MCP
 
@@ -169,6 +169,13 @@ En **Medios**, «Añadir efecto de sonido» abre `../assets/audio/Biblioteca/Efe
 Los archivos externos elegidos desde estos dos botones se copian a la biblioteca y quedan disponibles en otros proyectos. También puedes guardar nuevos audios directamente en esas carpetas. Al abrir el selector se incorporan nuevos archivos de `assets/audio/{sfx,music}`, `assets/sfx/editorial` y `editor/assets/sfx`, conservando originales y rutas ya utilizadas. `../assets/audio/catalog.json` asigna nombres y carpetas; el índice interno evita copias repetidas. La música añadida desde su botón empieza a −24 dB con fundidos de 0,5 s; ajusta su volumen en el inspector. Los efectos mantienen su nivel original. El importador genérico conserva su comportamiento.
 
 CLI: `{"action":"audioLibrary","role":"sfx"}` o `"music"` devuelve la carpeta actualizada sin modificar un proyecto. Un `import` con `libraryRole:"sfx"` o `"music"` conserva el audio en la biblioteca y lo inserta con ese rol. Las revisiones y el historial siguen aplicándose.
+
+## Actualización 1.15.1
+
+- **Emojis en los ganchos.** El gancho nativo de Instagram dibuja los emojis en color, con Apple Color Emoji, dentro de su caja; antes salía un cuadrado.
+- **Notas al momento.** Guardar un comentario lo publica sin esperar a la captura, que el Mac completa después y reintenta si falla. Las capturas pasan a 720p (lado mayor de 1280 px).
+- **Móvil más fluido con el Mac ocupado.** Cada petición lee solo el montaje abierto, los textos se descargan con antelación, la calidad baja a 640 px solo si la conexión no llega y un comentario nuevo muestra al instante el fotograma que tienes en pantalla.
+- Vista previa: los textos ya dibujados no se vuelven a leer del disco.
 
 ## Actualización 1.15.0 · optimizada para Mac
 

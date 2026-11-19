@@ -64,17 +64,27 @@ def percent_db(value):
 
 
 def public_project(p):
-    result = copy.deepcopy(p)
-    result['assets'] = [{k: v for k, v in a.items() if k in ('id', 'name', 'kind', 'duration', 'width', 'height', 'audio')}
-                        for a in p['assets']]
-    return result
+    """What the phone sees of a project just read: only ever serialised, so it shares the rest of that read."""
+    return {**p, 'assets': [{k: v for k, v in a.items() if k in ('id', 'name', 'kind', 'duration', 'width', 'height', 'audio')}
+                            for a in p['assets']]}
 
 
 def public_note(note):
     return {k: v for k, v in note.items() if k != 'files'}
 
 
+def signature(path):
+    """Saves replace a file (os.replace), so another inode, time or size is another file; None if there is none."""
+    try:
+        found = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return found.st_ino, found.st_mtime_ns, found.st_size
+
+
 class Companion:
+    RETRY = 30  # seconds before taking again a picture that failed, doubling up to half an hour
+
     def __init__(self, projects, runtime):
         self.projects = Path(projects).resolve()
         self.runtime = Path(runtime)
@@ -90,42 +100,81 @@ class Companion:
         self.activity = threading.Lock()
         self.active = Counter()
         self.planned = {}
+        self.known = {}  # montage file -> what the library lists of it, with the signature it was read with
+        self.ids = {}
+        self.noted = {}  # montage file -> (signatures, notes) of the last full state
+        self.swept = {}  # montage file -> signatures of its notes when last looked for pictures to take
+        self.capture_lock = threading.Lock()
+        self.waiting = {}  # (montage file, note) -> (when, failures) of a picture still to take
+        self.capturing = False
         with self.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, digest TEXT, result TEXT)')
 
     def db(self):
         return sqlite3.connect(self.runtime / 'requests.sqlite3', timeout=30)
 
+    def entry(self, path):
+        """What the library lists of a montage; its file is read again only when it changed."""
+        stamp = signature(path)
+        if stamp is None:
+            raise FileNotFoundError(path)
+        entry = self.known.get(path)
+        if entry is None or entry['stamp'] != stamp:
+            p = project.load(path)
+            entry = self.known[path] = dict(stamp=stamp, id=p['id'], name=p['name'], revision=p['revision'], width=p['width'],
+                                            height=p['height'], duration=project.duration(p)/p['fps'])
+        return entry
+
     def catalog(self):
         result = {}
         for path in project_library.project_files(self.projects):
             if not path.resolve().is_relative_to(self.projects):
                 continue
-            p = project.load(path)
-            if p['id'] in result:
+            entry = self.entry(path)
+            if entry['id'] in result:
                 raise ValueError('Hay proyectos con la misma identidad; revisa la biblioteca en el Mac')
-            result[p['id']] = (path, p)
+            result[entry['id']] = (path, entry)
+        self.known, self.ids = dict(result.values()), {pid: path for pid, (path, _) in result.items()}
         return result
 
-    def resolve(self, pid):
-        found = self.catalog().get(identifier(pid))
+    def locate(self, pid):
+        """A request on one montage reads that montage, not the library."""
+        pid = identifier(pid)
+        try:
+            path = self.ids[pid]
+            entry = self.entry(path)
+            if entry['id'] == pid:
+                return path, entry
+        except (OSError, ValueError, KeyError):
+            pass
+        found = self.catalog().get(pid)
         if not found:
             raise ValueError('Proyecto no encontrado')
-        return found[0]
+        return found
+
+    def resolve(self, pid):
+        return self.locate(pid)[0]
 
     def read(self, pid, revision=None):
         path = self.resolve(pid)
         with editor.lock(path):
             p = project.load(path)
-            if revision is not None:
-                p = sync.base_project(path, p, integer(revision))
+            if revision is not None and p['revision'] != integer(revision):
+                p = sync.base_project(path, p, revision)
         return path, p
 
     def state(self, pid, revision=None):
+        path, entry = self.locate(pid)
+        # Every open page asks every five seconds: an unchanged montage with unchanged notes is answered without reading them.
+        notes = feedback.root(path)/'feedback.sqlite3'
+        stamp = entry['stamp'], signature(notes), signature(notes.with_name(notes.name+'-wal'))
+        known = self.noted.get(path)
+        if revision == entry['revision'] and known and known[0] == stamp:
+            return {'project': None, 'revision': revision, 'notes': known[1]}
         path, p = self.read(pid)
-        notes = feedback.dispatch(path, p, {'command': 'list'})
-        return {'project': public_project(p) if p['revision'] != revision else None,
-                'revision': p['revision'], 'notes': [public_note(n) for n in notes['notes']]}
+        listed = [public_note(n) for n in feedback.dispatch(path, p, {'command': 'list'})['notes']]
+        self.noted[path] = stamp, listed
+        return {'project': public_project(p) if p['revision'] != revision else None, 'revision': p['revision'], 'notes': listed}
 
     def client_log(self, entries):
         """What the phone's player measured: timings and failures, bounded, never content."""
@@ -145,9 +194,9 @@ class Companion:
             catalog = list(self.catalog().values())
             self.direct.queue(1, [])  # Leaving a montage stops preparing the rest of it.
             threading.Thread(target=self.prepare, args=(catalog,), daemon=True).start()
-            return {'folders': library['folders'], 'projects': [dict(id=p['id'], name=p['name'], revision=p['revision'],
-                width=p['width'], height=p['height'], duration=project.duration(p)/p['fps'],
-                folder=library['assignments'].get(p['id'])) for _, p in catalog]}
+            return {'folders': library['folders'], 'projects': [dict(id=e['id'], name=e['name'], revision=e['revision'],
+                width=e['width'], height=e['height'], duration=e['duration'],
+                folder=library['assignments'].get(e['id'])) for _, e in catalog]}
         if action == 'state':
             return self.state(req['project'], req.get('revision'))
         if action == 'warm':
@@ -183,11 +232,11 @@ class Companion:
     def prepare(self, catalog):
         """Short montages are ready before they are opened; long ones, their first minute. Newest first."""
         urls = []
-        for path, p in sorted(catalog, key=lambda item: item[0].stat().st_mtime, reverse=True):
-            stamp = path.stat().st_mtime_ns
+        for path, entry in sorted(catalog, key=lambda item: item[1]['stamp'][1], reverse=True):
+            stamp = entry['stamp']
             if self.planned.get(path, (0,))[0] != stamp:  # Only a montage that changed is planned again.
                 try:
-                    plan = self.direct.plan(p, 1280)  # What a phone asks for first.
+                    plan = self.direct.plan(project.load(path), 1280)  # What a phone asks for first.
                 except (OSError, KeyError, ValueError):
                     plan = None  # A montage with an unreadable source still lists; opening it reports the problem.
                 self.planned[path] = (stamp, [url for start, _, url in sorted(spans(plan)) if plan['frames'] <= 900*plan['fps'] or start < 60] if plan else [])
@@ -203,7 +252,8 @@ class Companion:
                 if stamp != seen:
                     self.prepare(list(self.catalog().values()))
                     seen = stamp
-            except (OSError, KeyError, ValueError):
+                self.sweep()
+            except (OSError, KeyError, ValueError, sqlite3.Error):
                 pass
             # macOS stops letting a process read Documents once the file it runs from is replaced, as a Codex update
             # does, and an engine changed on the Mac writes montages the one loaded here rejects, which fails the
@@ -212,6 +262,53 @@ class Companion:
                 if running() not in (None, started) and not self.active:
                     os._exit(0)
             time.sleep(20)
+
+    def sweep(self):
+        """A note published before its picture was taken, here before a restart or by anyone, gets it."""
+        for path in list(self.known):
+            notes = feedback.root(path)/'feedback.sqlite3'
+            stamp = signature(notes), signature(notes.with_name(notes.name+'-wal'))
+            if stamp[0] is None or self.swept.get(path) == stamp:
+                continue
+            self.swept[path] = stamp
+            with feedback.database(path) as db:
+                waiting = [n['id'] for n in (json.loads(row[0]) for row in db.execute('SELECT body FROM notes'))
+                           if n['status'] in ('open', 'resolved') and n['capture'] != 'ready']
+            for nid in waiting:
+                self.capture_later(path, nid)
+
+    def capture_later(self, path, nid):
+        """Pictures of saved notes are taken here, one at a time; one that fails is taken again, ever less often."""
+        with self.capture_lock:
+            self.waiting.setdefault((path, nid), (time.monotonic(), 0))
+            if not self.capturing:
+                self.capturing = True
+                threading.Thread(target=self.captures, daemon=True).start()
+
+    def captures(self):
+        while True:
+            with self.capture_lock:
+                if not self.waiting:
+                    self.capturing = False
+                    return
+                key, (due, failures) = min(self.waiting.items(), key=lambda item: item[1])
+                now = time.monotonic()
+                if due <= now:
+                    del self.waiting[key]
+            if due > now:
+                time.sleep(min(5, due - now))
+                continue
+            try:
+                self.capture(*key)
+            except Exception:
+                if signature(key[0]):  # A montage that is gone has nothing left to capture.
+                    with self.capture_lock:
+                        self.waiting.setdefault(key, (time.monotonic() + min(1800, self.RETRY * 2**failures), failures + 1))
+
+    def capture(self, path, nid):
+        """The picture of a note, taken once: a reader asking for it while it is being taken waits for that one."""
+        with self.media:
+            return editor.dispatch(dict(project=str(path), action='feedback', command='capture', id=nid))
 
     def mutate(self, req):
         rid = identifier(req.get('requestId'))
@@ -247,7 +344,7 @@ class Companion:
                     del self.active[rid]
 
     def execute(self, req):
-        path, p = self.read(req['project'])
+        path = self.resolve(req['project'])
         rev = integer(req.get('revision'))
         action = req.get('action')
         base = dict(project=str(path), revision=rev)
@@ -266,21 +363,12 @@ class Companion:
                     if db.execute('SELECT 1 FROM notes WHERE id=?', (nid,)).fetchone():
                         raise sync.Conflict('Este comentario ya existe en el Mac. Abre su versión guardada antes de editarlo.')
                 editor.dispatch(dict(base, action='feedback', command='create', id=nid, frame=integer(req['frame'])))
-                # Draft text reaches the Mac before potentially slow capture preparation.
-                note = editor.dispatch(dict(base, action='feedback', command='update', id=nid, version=1,
-                                            values={'text': text, 'strokes': strokes, 'status': 'draft'}))
-                version = note['version']
-            saved = editor.dispatch(dict(base, action='feedback', command='get', id=nid))
-            if saved['capture'] != 'ready' or 'image' not in saved['files']:
-                if not self.media.acquire(timeout=15):
-                    raise ValueError('El Mac sigue preparando medios. Tu borrador se conserva; vuelve a intentarlo en unos instantes.')
-                try:
-                    editor.dispatch(dict(base, action='feedback', command='capture', id=nid))
-                finally:
-                    self.media.release()
-            values = dict(text=text, strokes=strokes, status='open')
-            note = editor.dispatch(dict(base, action='feedback', command='update', id=nid,
-                                         version=integer(version, 1), values=values))
+                version = 1
+            # Published as soon as its text and drawing are on the Mac; its snapshot is, so the picture comes after.
+            note = editor.dispatch(dict(base, action='feedback', command='update', id=nid, version=integer(version, 1),
+                                        values=dict(text=text, strokes=strokes, status='open')))
+            if note['capture'] != 'ready':
+                self.capture_later(path, nid)
             return {'note': public_note(note)}
         if action not in ('edit', 'undo', 'redo'):
             raise ValueError('Acción no disponible en móvil')
@@ -421,10 +509,9 @@ class Companion:
     def note_image(self, pid, nid):
         path, p = self.read(pid)
         note = feedback.dispatch(path, p, {'command': 'get', 'id': identifier(nid)})
-        image = note.get('files', {}).get('image')
-        if not image:
-            raise ValueError('La captura aún no está lista')
-        return Path(image).read_bytes(), 'image/png'
+        if note['capture'] != 'ready' or 'image' not in note['files']:
+            note = self.capture(path, note['id'])  # Asked for before the background took it: taken now.
+        return Path(note['files']['image']).read_bytes(), 'image/png'
 
     def segment(self, pid, revision, index, extension):
         _, p = self.read(pid, revision)
@@ -476,6 +563,10 @@ class Companion:
 
 class Handler(BaseHTTPRequestHandler):
     server_version = 'StudioMobile'
+    # One connection carries many requests: a new one per request costs a thread and the GIL a handover each time.
+    protocol_version = 'HTTP/1.1'
+    timeout = 300
+    answering = False
 
     def log_message(self, *args):
         pass  # No request bodies, identity headers, filenames or private URLs in logs.
@@ -505,6 +596,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+        if self.close_connection:
+            self.send_header('Connection', 'close')
         for k, v in (headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -512,16 +605,28 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
 
     def error(self, status, message):
+        if self.answering:  # Half an answer is already out: the connection cannot carry another.
+            self.close_connection = True
+            return
         self.send(json.dumps({'ok': False, 'error': message}).encode(), 'application/json', status)
 
+    def end_headers(self):
+        super().end_headers()
+        self.answering = True
+
+    def parse_request(self):
+        self.answering = False
+        return super().parse_request()
+
     def do_POST(self):
-        if not self.allowed(True):
-            return self.error(403, 'Acceso no autorizado')
-        if self.path != '/api':
-            return self.error(404, 'No encontrado')
+        allowed = self.allowed(True)
+        if not allowed or self.path != '/api':
+            self.close_connection = True  # Its body was not read: what follows on the connection is not a request.
+            return self.error(403, 'Acceso no autorizado') if not allowed else self.error(404, 'No encontrado')
         try:
             length = int(self.headers.get('Content-Length', '0'))
             if not 0 < length <= 512_000:
+                self.close_connection = True
                 return self.error(413, 'Petición demasiado grande')
             req = json.loads(self.rfile.read(length))
             if not isinstance(req, dict):

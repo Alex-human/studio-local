@@ -32,13 +32,24 @@ class FeedbackTests(unittest.TestCase):
   n=self.update(n,dict(text='Mover aquí',strokes=[stroke],status='open'));self.assertEqual(self.path.read_bytes(),before)
   with Image.open(n['files']['image']) as a,Image.open(n['files']['annotated']) as b:self.assertIsNotNone(ImageChops.difference(a,b).getbbox())
   self.assertEqual(self.call('get',id=n['id'])['strokes'],[stroke])
+ def test_a_note_is_published_before_its_capture_and_the_capture_draws_the_strokes_of_then(self):
+  stroke=dict(tool='ellipse',color='#ffad5c',width=.01,points=[[.1,.1],[.7,.7]])
+  n=self.update(self.create(),dict(text='Al momento',strokes=[],status='open'))
+  self.assertEqual((n['status'],n['capture']),('open','pending'));self.assertNotIn('image',n['files']);self.assertNotIn('annotated',n['files'])
+  n=self.call('capture',id=self.update(n,dict(strokes=[stroke]))['id'])
+  with Image.open(n['files']['image']) as a,Image.open(n['files']['annotated']) as b:self.assertIsNotNone(ImageChops.difference(a,b).getbbox(),'drawn with the strokes the note has when its picture is taken')
+ def test_a_capture_is_720p_and_a_smaller_montage_keeps_its_size(self):
+  for (w,h),size in [((1920,1080),(1280,720)),((1080,1920),(720,1280)),((320,180),(320,180))]:
+   p=project.load(self.path);p['width'],p['height']=w,h;project.save(self.path,p)
+   n=self.call('capture',id=self.create(id=f'size{w}')['id'])
+   with Image.open(n['files']['image']) as image:self.assertEqual(image.size,size)
  def test_capture_failure_keeps_text_and_retries(self):
   n=self.update(self.create(),{'text':'No perder esto'})
   with patch.object(render,'frame',side_effect=ValueError('test capture')):
    with self.assertRaises(ValueError):self.call('capture',id=n['id'])
   n=self.call('get',id=n['id']);self.assertEqual(n['text'],'No perder esto');self.assertEqual(n['capture'],'error')
-  with self.assertRaises(ValueError):self.update(n,{'status':'open'})
-  n=self.call('capture',id=n['id']);self.assertEqual(n['capture'],'ready');self.assertEqual(n['version'],2)
+  n=self.update(n,{'status':'open'});self.assertEqual((n['status'],n['capture']),('open','error'),'published, its picture still to take')
+  n=self.call('capture',id=n['id']);self.assertEqual(n['capture'],'ready');self.assertEqual(n['version'],3)
  def test_anchor_moves_after_ripple_and_removed_note_survives(self):
   n=self.create();editor.dispatch(dict(action='ops',project=str(self.path),revision=0,ops=[dict(op='cutRange',start=5,end=15)]))
   self.assertEqual(self.call('get',id=n['id'])['currentFrame'],35)

@@ -558,7 +558,8 @@ function openNote(note=null) {
   if(note && draft && draft.noteId!==note.id && (draft.text.trim()||draft.strokes.length)) {notice('Conservamos tu borrador. Termina o descártalo antes de abrir otro comentario.');note=null;}
   noteDraft=draft && (!note||draft.noteId===note.id) ? draft : note ? {project:p.id,revision:note.revision,noteId:note.id,frame:note.frame,version:note.version,text:note.text,strokes:structuredClone(note.strokes)} : {project:p.id,revision:p.revision,noteId:crypto.randomUUID(),frame,text:'',strokes:[]};
   $('noteText').value=noteDraft.text; $('noteTime').textContent=`${seconds(noteDraft.frame/p.fps)} · FOTOGRAMA ${noteDraft.frame}`;
-  $('noteImage').src=noteDraft.version ? `/note/${noteDraft.project}/${noteDraft.noteId}.png` : `/media/${noteDraft.project}/${noteDraft.revision}/${noteDraft.frame}.jpg`;
+  // A new note on the frame on screen shows that picture; the Mac renders its own capture when the note is saved.
+  $('noteImage').src=noteDraft.version ? `/note/${noteDraft.project}/${noteDraft.noteId}.png` : noteDraft.revision===p.revision&&direct.still(noteDraft.frame) || `/media/${noteDraft.project}/${noteDraft.revision}/${noteDraft.frame}.jpg`;
   $('loadSavedNote').hidden=!note||!draft||draft.noteId!==note.id||draft.version===note.version;
   $('noteDialog').showModal(); drawing=false; updateDrawingMode(); saveDraft(); $('noteText').focus();
 }
